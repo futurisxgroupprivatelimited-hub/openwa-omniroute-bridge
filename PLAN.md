@@ -1,198 +1,123 @@
-# OpenWA Bridge — Multi-Character WhatsApp LLM Assistant
+# OpenBridge — Multi-Tenant WhatsApp AI SaaS (v2.0)
 
-A professional, self-contained WhatsApp bridge that connects **OpenWA** (WhatsApp gateway)
-to **OmniRoute** (multi-provider LLM gateway) with **editable multi-character personas**,
-**hyper-realistic human typing simulation**, and a **full management dashboard**.
+Turn any number of WhatsApp numbers (each a **tenant**) into conversational AI characters,
+with per-user webhooks, PostgreSQL persistence, and pluggable per-tenant OpenWA + a shared OmniRoute LLM gateway.
 
 ---
 
 ## 1. Vision
 
-Turn any WhatsApp number into a conversational AI character that:
-- Replies as a **specific persona** (e.g. a Nepali actress, a business, a friend)
-- Maintains **per-chat memory** from the OpenWA database
-- Types like a **real human** (read → type → delete → think → type → send)
-- Keeps **short, natural** replies with emojis
-- Supports **multiple characters** on the same number, routed per chat
-- Is fully **editable from a dashboard** — no code changes needed
+- **Multi-tenant** by default: one bridge instance, many accounts, full isolation.
+- Each account gets its own **authenticated webhook URL** — no shared secrets.
+- Characters, WhatsApp sessions, chat routing, and message history live in **Postgres**, per user.
+- Tenants bring their own **OpenWA** instance (and API key); the bridge calls out to it on their behalf.
+- Shared **OmniRoute** LLM gateway keeps costs down and providers flexible.
 
 ---
 
 ## 2. Architecture
 
 ```
-┌──────────────┐     ┌─────────────────────────┐     ┌─────────────────────┐     ┌─────────────────┐
-│   WhatsApp   │────▶│      OpenWA Server      │────▶│   Bridge (Node.js)  │────▶│    OmniRoute    │
-│    User      │◀────│   port 2785 (Docker)    │◀────│     port 3001       │◀────│   port 20128    │
-│              │     │                         │     │                     │     │                 │
-│ Sends msg    │     │ • whatsapp-web.js engine│     │ • HMAC verify       │     │ • 290+ providers│
-│ Sees typing  │     │ • Webhook dispatch      │     │ • Memory fetch (DB) │     │ • Free tier      │
-│ Gets reply   │     │ • Typing indicator      │     │ • Character routing │     │ • Auto-fallback │
-└──────────────┘     │ • REST API + Dashboard  │     │ • LLM call          │     └─────────────────┘
-                     │ • SQLite storage        │     │ • Typing simulation │
-                     └─────────────────────────┘     │ • Send reply        │
-                                                      └─────────────────────┘
+ WhatsApp   ─▶  Tenant OpenWA (their own)  ─▶  POST /webhook/<token>[/<slug>]
+                    ▲                                    │
+                    │ send-text / typing / history       │ verify token (+HMAC) + dedupe
+                    │                                    ▼
+                    └────  OpenBridge API (express, :3001) ──▶ OmniRoute (LLM, :20128)
+                                 │
+                                 ▼
+                          Postgres (:5432) — users, characters, wa_sessions,
+                                             chat_routing, messages
 ```
 
 ### Directory structure
 
 ```
-openwa-omniroute-bridge/
-├── bridge.mjs              # Main server (zero deps, Node built-ins only)
-├── characters.json         # ★ EDITABLE character profiles (multi-persona)
-├── settings.json           # ★ EDITABLE bridge settings (model, memory, typing)
-├── .env                    # Secrets (API keys, webhook secret) — gitignored
-├── start.sh                # Launcher (loads .env, starts bridge)
-├── package.json            # Metadata + scripts
-├── PLAN.md                 # This document
-├── .gitignore
-└── public/
-    └── index.html          # Management dashboard (status, editors, logs)
+├── docs/ARCHITECTURE.md     # multi-tenancy, webhook scheme, security, Docker topology
+├── docs/DATABASE.md         # full schema
+├── docs/API.md              # REST + inbound webhook reference
+├── Dockerfile               # npm run migrate → node src/server.js
+├── docker-compose.yml       # db, api, omniroute
+├── db/migrations/001_init.sql
+├── src/
+│   ├── config.js            # env config (OMNIROUTE_BASE_URL etc.)
+│   ├── db.js                # pg Pool
+│   ├── migrate.js           # schema_migrations runner + bootstrap admin
+│   ├── auth.js              # JWT + X-API-Key middleware
+│   ├── server.js            # bootstrap, static SPA, background tenant poller
+│   ├── webhook.js           # inbound /webhook/:token[/:slug] (raw body, HMAC, idempotency)
+│   ├── routes/              # auth, characters, sessions, settings, webhooks, dashboard
+│   └── services/
+│       ├── omniroute.js     # chat/completions with fallback
+│       ├── openwa.js        # outbound tenant OpenWA client
+│       └── bridge.js        # prompt build, routing, typing, inbound handling, session sync
+└── public/                  # SPA dashboard
 ```
 
 ---
 
-## 3. Data flow — one incoming message
+## 3. Webhook scheme
 
-```
-User types "k cha?"
-  1. OpenWA engine receives the message
-  2. OpenWA fires `message.received` → POSTs signed webhook to bridge
-  3. Bridge verifies HMAC-SHA256 signature
-  4. Bridge deduplicates via X-OpenWA-Idempotency-Key
-  5. Bridge fetches last N messages from OpenWA DB (per-chat memory)
-  6. Bridge picks the character routed to this chat (or default)
-  7. Bridge assembles: system prompt (character) + history + user message
-  8. Bridge calls OmniRoute /v1/chat/completions (model from settings)
-  9. Bridge executes the typing pattern (8–15s of realism)
- 10. Bridge sends reply via OpenWA send-text API
- 11. WhatsApp delivers reply to the user
-```
+- `POST /webhook/<webhook_token>` — generic; character resolved by priority below.
+- `POST /webhook/<webhook_token>/<character_slug>` — forces that character.
+- Token = 48 hex chars, generated at registration, unique, regenerable from dashboard.
+- Optional HMAC: `X-OpenWA-Signature: sha256=<hmac>` using tenant `webhook_secret`.
+- Idempotency: `X-OpenWA-Idempotency-Key` dedupes within a 5-min window.
 
----
+### Routing priority
 
-## 4. Multi-character system
-
-### characters.json — one record per persona
-
-```json
-{
-  "characters": [
-    {
-      "id": "barsha",
-      "name": "Barsha Siwakoti",
-      "active": true,
-      "default": true,
-      "languages": ["English", "Nepali"],
-      "replyStyle": "short, casual, max 1-2 sentences, emojis sparingly",
-      "personality": "warm, friendly, playful, never reveals being AI",
-      "bio": "Born 6 April 1993 in Kawasoti Nepal...",
-      "typingProfile": {
-        "readDelayMs": [2000, 5000],
-        "falseStartChance": 0.35,
-        "minTypingMs": 2000,
-        "maxTypingMs": 8000
-      }
-    }
-  ],
-  "chatRouting": {
-    "104089270661245@lid": "barsha"
-  }
-}
-```
-
-### Routing rules
-
-1. If the message arrived on a **character webhook** (`/webhook/<slug>`), use that character.
-2. If a `sessionId` is in `sessionRouting`, use that character (per-WhatsApp-number).
-3. If a `chatId` is in `chatRouting`, use that character.
-4. Otherwise use the character flagged `"default": true`.
-5. Characters can be toggled `active` — inactive ones are never assigned.
-
-### Per-character webhooks
-
-Every active character exposes `POST /webhook/<slug>` (slug derived from id or `webhookPath`).
-Messages delivered via a character's URL are handled exclusively by that character.
-`GET /webhooks` lists the URLs; `POST /webhooks/register` adds them to an OpenWA session
-using the bridge API key. Auto-registration on new sessions is on by default
-(`settings.json → webhooks.autoRegister`).
-
-### Multi-session awareness
-
-The bridge discovers all OpenWA sessions (`GET /api/sessions`) on startup and polls every 30s.
-For each session it tracks: name, status (ready/qr_ready/etc.), phone, webhook registration,
-last seen activity, and the character it routes to. Newly discovered sessions get their webhooks
-auto-registered. Exposed via `GET /sessions` and surfaced in the dashboard **Sessions** tab.
+1. webhook `slug`
+2. `session.character_id` (per-session assignment)
+3. `chat_routing` (per-chat override)
+4. `user.default_character_id`
+5. first active character
 
 ---
 
-## 5. Typing simulation (hyper-realistic)
+## 4. Multi-tenancy model
 
-```
-Step 1   READ message            2–5s        (human reads before reacting)
-Step 2   START typing            1.5–3.5s    (types something)
-Step 3   DELETE everything       1.5–4s      (changes mind, thinks)
-Step 4   FALSE START (35%)       1–2.5s      (types again, deletes again)
-Step 5   FINAL typing            2–8s        (scales with reply length)
-Step 6   RE-READ before send     0.4–1.2s    (re-reads, hits send)
-Step 7   MESSAGE DELIVERED        ✓
-```
-
-Each step toggles OpenWA's typing indicator (`sendChatState: typing/paused`), so the
-recipient sees the "typing..." bubble appear, vanish, and reappear realistically.
-All timings are per-character editable in `characters.json` → `typingProfile`.
-
----
-
-## 6. Configurability
-
-| What | Where | Editable in dashboard |
+| Table | Scope | Purpose |
 |---|---|---|
-| Model (e.g. antigravity/gpt-oss-120b-medium) | `settings.json` | ✅ |
-| Memory depth (messages fetched per chat) | `settings.json` | ✅ |
-| Max LLM tokens / reply cap | `settings.json` | ✅ |
-| Typing timings (global) | `settings.json` | ✅ |
-| Characters (name, bio, prompt, languages) | `characters.json` | ✅ |
-| Chat → character routing | `characters.json` | ✅ |
-| Secrets (API key, webhook secret) | `.env` | ❌ (by design) |
+| `users` | — | auth, webhook token/secret, OpenWA creds, defaults, typing profile |
+| `characters` | user_id | personas (UNIQUE user_id+slug) |
+| `wa_sessions` | user_id | tenant OpenWA sessions, status, webhook_registered, assigned character |
+| `chat_routing` | user_id | chatId → character override |
+| `messages` | user_id | persisted inbound/outbound history |
+
+Tenant OpenWA is **remote**: the bridge holds `openwa_base_url` + `openwa_api_key` per user and
+calls it for session discovery, history, typing, send-text, and webhook registration.
 
 ---
 
-## 7. API surface (bridge, port 3001)
+## 5. Inbound flow
 
-| Method | Path | Purpose |
-|---|---|---|
-| POST | `/webhook` | Generic webhook receiver (routing priority below) |
-| POST | `/webhook/:slug` | Per-character webhook receiver (forces that character) |
-| GET  | `/webhooks` | List generic + per-character webhook URLs |
-| POST | `/webhooks/register` | Register webhook(s) onto an OpenWA session |
-| GET  | `/health` | Liveness + stats + session count |
-| GET  | `/logs?lines=N` | Recent bridge logs |
-| GET  | `/config` | Resolved config (settings + active prompt + sessions) |
-| GET  | `/sessions` | Discovered OpenWA sessions (status, webhook, character) |
-| PUT  | `/sessions` | Save session → character routing |
-| GET  | `/characters` | All character profiles |
-| PUT  | `/characters` | Save all characters (persists to disk) |
-| GET  | `/settings` | Current settings |
-| PUT  | `/settings` | Save settings (persists to disk) |
+```
+webhook → verify token → (HMAC) → (dedupe) → parse event
+  → session lookup/upsert → resolve character
+  → fetch history from tenant OpenWA → build system prompt
+  → askModel (OmniRoute) → typing simulation → sendText (tenant OpenWA)
+  → persist incoming + outgoing messages
+```
 
 ---
 
-## 8. Roadmap
+## 6. Roadmap
 
-### v0.3 (current)
-- [x] Webhook receiver with HMAC + idempotency
-- [x] Per-chat memory from OpenWA DB
-- [x] Single-character persona (Barsha Siwakoti)
-- [x] Hyper-realistic typing simulation
-- [x] Multi-character routing (`chatRouting` + default)
-- [x] Multi-session awareness (discover + auto-register webhooks + per-session routing)
-- [x] Per-character webhooks (`/webhook/:slug` forces character) + register API + dashboard tab
-- [x] Dashboard editors for characters + settings + session routing
-- [x] One-command setup (`setup.sh`) — installs OpenWA + OmniRoute
-- [x] Professional character model (greeting, tags, visibility, examples, version)
-- [x] Full README docs
-- [ ] Send media (images, voice) — future
-- [ ] Keyword/command triggers per character — future
-- [ ] Rate limiting / cooldowns per chat — future
-- [ ] `antigravity/gpt-oss-120b-medium` via OmniRoute Google OAuth — blocked on user auth
+### v2.0 (current)
+- [x] Multi-tenant auth (register/login/JWT/API key), bootstrap admin
+- [x] Per-user webhook tokens + optional HMAC + idempotency
+- [x] PostgreSQL schema + auto-migrations
+- [x] Characters CRUD (full persona fields)
+- [x] Session discovery + per-session character assignment + auto webhook registration
+- [x] Tenant OpenWA outbound client (history, typing, send, webhooks)
+- [x] OmniRoute LLM client with fallback
+- [x] Persisted message history + dashboard stats/logs
+- [x] SPA dashboard (overview, characters, sessions, webhooks, settings)
+- [x] Docker compose (db, api, omniroute)
+- [x] Docs (ARCHITECTURE, DATABASE, API)
+
+### Future
+- [ ] Billing / plans / rate limits per tenant
+- [ ] Media messages (images, voice notes)
+- [ ] Per-character keyword/command triggers
+- [ ] Admin panel for tenant management
+- [ ] Webhook retry queue + delivery metrics

@@ -1,0 +1,64 @@
+services:
+  db:
+    image: postgres:16-alpine
+    container_name: openbridge-db
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-openbridge}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-openbridge}
+      POSTGRES_DB: ${POSTGRES_DB:-openbridge}
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-openbridge}"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    ports:
+      - "5432:5432"
+
+  api:
+    build: .
+    container_name: openbridge-api
+    restart: unless-stopped
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      PORT: 3001
+      DATABASE_URL: postgres://${POSTGRES_USER:-openbridge}:${POSTGRES_PASSWORD:-openbridge}@db:5432/${POSTGRES_DB:-openbridge}
+      JWT_SECRET: ${JWT_SECRET:-change-me-in-production}
+      JWT_EXPIRES: ${JWT_EXPIRES:-12h}
+      WEBHOOK_BASE: ${WEBHOOK_BASE:-http://localhost:3001}
+      OMNIROUTE_BASE_URL: ${OMNIROUTE_BASE_URL:-http://omniroute:20128}
+      ADMIN_EMAIL: ${ADMIN_EMAIL:-admin@openbridge.local}
+      ADMIN_PASSWORD: ${ADMIN_PASSWORD:-admin12345}
+    ports:
+      - "3001:3001"
+    volumes:
+      - ./public:/app/public:ro
+
+  omniroute:
+    image: diegosouzapw/omniroute:latest
+    container_name: openbridge-omniroute
+    restart: unless-stopped
+    ports:
+      - "20128:20128"
+    volumes:
+      - omniroute-data:/app/data
+
+  # Optional demo tenant gateway — uncomment to run your own OpenWA inside this stack.
+  # openwa:
+  #   build: ./openwa
+  #   container_name: openbridge-openwa
+  #   restart: unless-stopped
+  #   environment:
+  #     DATABASE_TYPE: sqlite
+  #     SSRF_ALLOWED_HOSTS: localhost,127.0.0.1,host.docker.internal
+  #     SIMULATE_TYPING: "true"
+  #   ports:
+  #     - "2785:2785"
+
+volumes:
+  pgdata:
+  omniroute-data:

@@ -1,13 +1,20 @@
 {
-  "name": "openwa-omniroute-bridge",
-  "version": "1.0.0",
-  "description": "Professional multi-character WhatsApp bridge connecting OpenWA to OmniRoute LLM",
+  "name": "openbridge",
+  "version": "2.0.0",
+  "description": "Multi-tenant SaaS WhatsApp AI platform — authenticated per-user webhooks, characters, and session-to-character routing on PostgreSQL",
   "type": "module",
   "scripts": {
-    "start": "bash start.sh",
-    "dev": "bash start.sh"
+    "start": "node src/server.js",
+    "dev": "node --watch src/server.js",
+    "migrate": "node src/migrate.js",
+    "test": "node --test"
   },
-  "author": "",
-  "license": "MIT",
-  "keywords": ["whatsapp", "llm", "openwa", "omniroute", "bridge", "chatbot"]
+  "dependencies": {
+    "bcryptjs": "^2.4.3",
+    "dotenv": "^16.4.5",
+    "express": "^4.19.2",
+    "jsonwebtoken": "^9.0.2",
+    "pg": "^8.12.0"
+  },
+  "license": "MIT"
 }

@@ -1,571 +1,144 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-<meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>OpenWA Bridge — Dashboard</title>
-<style>
-*{margin:0;padding:0;box-sizing:border-box}
-:root{--bg:#0a0b0f;--bg2:#10121a;--card:#161822;--border:#252838;--accent:#7c6cf0;--accent2:#00d2a0;--text:#e2e4ed;--muted:#6b7094;--danger:#f0475e;--warning:#f5a623;--success:#43b581;--link:#5865f2}
-body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;background:var(--bg);color:var(--text);font-size:13px}
-.topbar{background:var(--bg2);border-bottom:1px solid var(--border);padding:10px 24px;display:flex;align-items:center;justify-content:space-between;position:sticky;top:0;z-index:100}
-.topbar h1{font-size:16px;font-weight:700;display:flex;align-items:center;gap:10px}
-.topbar h1 .logo{width:28px;height:28px;border-radius:8px;background:linear-gradient(135deg,#7c6cf0,#43b581);display:flex;align-items:center;justify-content:center;font-size:14px;font-weight:800;color:#fff}
-.badge-live{background:#43b58122;color:var(--success);padding:3px 10px;border-radius:12px;font-size:10px;font-weight:700;letter-spacing:1px;animation:pulse 2s infinite}
-@keyframes pulse{0%,100%{opacity:1}50%{opacity:.6}}
-.topbar-right{display:flex;gap:8px;flex-wrap:wrap}
-.spill{display:flex;align-items:center;gap:6px;padding:4px 12px;border-radius:16px;font-size:11px;font-weight:600;background:var(--card);border:1px solid var(--border)}
-.dot{width:8px;height:8px;border-radius:50%;flex-shrink:0}
-.dot.on{background:var(--success);box-shadow:0 0 6px var(--success)}
-.dot.off{background:var(--danger);box-shadow:0 0 6px var(--danger)}
-.dot.warn{background:var(--warning);box-shadow:0 0 6px var(--warning)}
-.tabs{display:flex;gap:0;border-bottom:1px solid var(--border);background:var(--bg2);padding:0 24px;position:sticky;top:48px;z-index:99;overflow-x:auto}
-.tab{padding:11px 18px;cursor:pointer;color:var(--muted);font-size:12px;font-weight:600;border-bottom:2px solid transparent;transition:all .15s;white-space:nowrap}
-.tab:hover{color:var(--text)}.tab.active{color:var(--accent);border-bottom-color:var(--accent)}
-.page{display:none;padding:24px;max-width:1600px;margin:0 auto}.page.active{display:block}
-.grid{display:grid;gap:14px}.g2{grid-template-columns:1fr 1fr}.g3{grid-template-columns:1fr 1fr 1fr}.g4{grid-template-columns:1fr 1fr 1fr 1fr}.g23{grid-template-columns:2fr 1fr}
-.card{background:var(--card);border:1px solid var(--border);border-radius:14px;padding:18px}
-.card h3{font-size:11px;color:var(--muted);text-transform:uppercase;letter-spacing:1.2px;margin-bottom:14px;font-weight:700;display:flex;align-items:center;justify-content:space-between}
-.card h3 .sub-inline{font-size:10px;color:var(--muted);font-weight:400;text-transform:none;letter-spacing:0;margin-left:10px}
-.big{font-size:36px;font-weight:800;letter-spacing:-1px}.sub{font-size:11px;color:var(--muted);margin-top:4px}
-.metric{text-align:center;padding:20px 12px}.section{margin-bottom:20px}
-table{width:100%;border-collapse:collapse}
-th{text-align:left;padding:10px 14px;font-size:10px;color:var(--muted);text-transform:uppercase;letter-spacing:.8px;border-bottom:1px solid var(--border);font-weight:700}
-td{padding:10px 14px;font-size:12px;border-bottom:1px solid var(--border)}
-tr:hover td{background:#ffffff04}
-.badge{padding:3px 10px;border-radius:6px;font-size:10px;font-weight:700;display:inline-block}
-.badge.green{background:#43b58120;color:var(--success)}
-.badge.red{background:#f0475e20;color:var(--danger)}
-.badge.yellow{background:#f5a62320;color:var(--warning)}
-.badge.purple{background:#7c6cf020;color:var(--accent)}
-.config-row{display:flex;align-items:center;justify-content:space-between;padding:10px 0;border-bottom:1px solid var(--border)}
-.config-row:last-child{border-bottom:none}
-.cl{font-size:12px;font-weight:600}.cv{font-size:12px;color:var(--muted);font-family:'SF Mono',Monaco,monospace;max-width:60%;text-align:right;word-break:break-all}
-.msg-list{max-height:440px;overflow-y:auto;display:flex;flex-direction:column;gap:6px}
-.msg{padding:10px 14px;border-radius:12px;max-width:75%;font-size:13px;line-height:1.5}
-.msg.in{background:#1a2744;align-self:flex-start;border-bottom-left-radius:4px}
-.msg.out{background:#251b4e;align-self:flex-end;border-bottom-right-radius:4px}
-.msg .sender{font-size:10px;color:var(--accent);font-weight:700;margin-bottom:2px}
-.msg .meta{font-size:10px;color:var(--muted);margin-top:3px}
-.chat-thread{display:flex;flex-direction:column;gap:5px;padding:16px;background:var(--bg);border-radius:10px;max-height:500px;overflow-y:auto}
-.btn{padding:7px 14px;border-radius:8px;border:none;cursor:pointer;font-size:12px;font-weight:600;transition:all .15s}
-.btn.primary{background:var(--accent);color:#fff}.btn.primary:hover{background:#6a5ce0}
-.btn.danger{background:var(--danger);color:#fff}.btn.sm{padding:5px 10px;font-size:11px}
-.btn.success{background:var(--success);color:#fff}
-textarea,input[type=text],input[type=number],select{width:100%;padding:8px 12px;border-radius:8px;background:var(--bg);color:var(--text);border:1px solid var(--border);font-size:12px;font-family:inherit;resize:vertical}
-textarea:focus,input:focus{border-color:var(--accent);outline:none}
-label{font-size:12px;font-weight:600;display:block;margin-bottom:4px;color:var(--text)}
-.field{margin-bottom:12px}
-.prompt-box{font-size:11px;line-height:1.8;color:#9ca3c0;white-space:pre-wrap;max-height:500px;overflow-y:auto;background:var(--bg);padding:16px;border-radius:10px;border:1px solid var(--border);font-family:'SF Mono',Monaco,monospace}
-.log-line{font-family:'SF Mono',Monaco,monospace;font-size:11px;padding:3px 0;border-bottom:1px solid #1a1d27;color:var(--muted);line-height:1.6}
-.log-line .tag{font-weight:700;font-size:10px;padding:1px 5px;border-radius:3px;margin-right:6px}
-.t-msg{background:#7c6cf020;color:var(--accent)}.t-llm{background:#00d2a020;color:var(--accent2)}.t-err{background:#f0475e20;color:var(--danger)}.t-mem{background:#f5a62320;color:var(--warning)}.t-typ{background:#5865f220;color:var(--link)}.t-send{background:#43b58120;color:var(--success)}.t-bridge{background:#ffffff10;color:var(--muted)}
-.typing-step{display:flex;align-items:center;gap:10px;padding:6px 0;font-size:12px}
-.typing-step .num{width:22px;height:22px;border-radius:50%;background:var(--card);border:1px solid var(--border);display:flex;align-items:center;justify-content:center;font-size:10px;font-weight:700;color:var(--accent);flex-shrink:0}
-.typing-step .bar{height:6px;border-radius:3px;background:var(--accent);opacity:.6}
-.auto-refresh{display:flex;align-items:center;gap:6px;font-size:11px;color:var(--muted)}
-.auto-refresh input{accent-color:var(--accent)}
-.char-card{border:2px solid var(--border);border-radius:12px;padding:16px;transition:border-color .2s}
-.char-card.active{border-color:var(--accent)}
-.char-card.is-default{border-color:var(--success)}
-.toast{position:fixed;bottom:20px;right:20px;background:var(--success);color:#fff;padding:12px 20px;border-radius:10px;font-size:13px;font-weight:600;z-index:999;opacity:0;transition:opacity .3s}
-.toast.show{opacity:1}
-@media(max-width:900px){.g2,.g3,.g4,.g23{grid-template-columns:1fr}}
-</style>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>OpenBridge — WhatsApp AI SaaS</title>
+<link rel="stylesheet" href="/styles.css">
 </head>
 <body>
-<div class="topbar">
-  <h1><div class="logo">W</div>OpenWA Bridge <span class="badge-live">LIVE</span></h1>
-  <div class="topbar-right">
-    <div class="spill"><div class="dot" id="dotBridge"></div>Bridge <span id="dotBridgeLabel">...</span></div>
-    <div class="spill"><div class="dot" id="dotOpenwa"></div>OpenWA <span id="dotOpenwaLabel">...</span></div>
-    <div class="spill"><div class="dot" id="dotOmni"></div>OmniRoute <span id="dotOmniLabel">...</span></div>
-    <div class="spill"><div class="dot" id="dotSession"></div><span id="dotSessionLabel">Session</span></div>
+
+<!-- AUTH -->
+<div id="authView">
+  <div class="auth-brand">
+    <div class="logo">W</div>
+    <h1>OpenBridge</h1>
+    <p>Multi-tenant WhatsApp AI characters</p>
   </div>
-</div>
-<div class="tabs" id="tabBar">
-  <div class="tab active" data-page="overview">Overview</div>
-  <div class="tab" data-page="sessions">Sessions</div>
-  <div class="tab" data-page="webhooks">Webhooks</div>
-  <div class="tab" data-page="characters">Characters</div>
-  <div class="tab" data-page="settings">Settings</div>
-  <div class="tab" data-page="messages">Messages</div>
-  <div class="tab" data-page="logs">Logs</div>
-  <div class="tab" data-page="typing">Typing Pattern</div>
-  <div class="tab" data-page="architecture">Architecture</div>
+  <div class="auth-tabs">
+    <button id="tabLogin" class="active" onclick="showAuth('login')">Login</button>
+    <button id="tabRegister" onclick="showAuth('register')">Register</button>
+  </div>
+  <form id="authForm" onsubmit="return submitAuth(event)">
+    <input id="authName" type="text" placeholder="Name" class="hidden">
+    <input id="authEmail" type="email" placeholder="Email" required>
+    <input id="authPass" type="password" placeholder="Password (min 8 chars)" required>
+    <button class="btn primary" type="submit" style="width:100%;margin-top:14px" id="authBtn">Login</button>
+  </form>
+  <div class="auth-hint" id="authHint">Login to your tenant dashboard. New here? Register a free account — you get a unique webhook URL to connect your OpenWA.</div>
 </div>
 
-<!-- OVERVIEW -->
-<div class="page active" id="page-overview">
-  <div style="display:flex;align-items:center;gap:12px;margin-bottom:16px">
-    <div class="auto-refresh"><input type="checkbox" id="autoRefresh" checked> Auto-refresh 5s</div>
-    <span style="font-size:11px;color:var(--muted)" id="lastRefresh"></span>
-  </div>
-  <div class="grid g4 section">
-    <div class="card metric"><h3>Bridge</h3><div class="big" id="m-bridge" style="color:var(--success)">ON</div><div class="sub">Port 3001 · Node.js</div></div>
-    <div class="card metric"><h3>WhatsApp</h3><div class="big" id="m-session" style="color:var(--warning)">...</div><div class="sub" id="m-session-sub">—</div></div>
-    <div class="card metric"><h3>OmniRoute</h3><div class="big" id="m-omni" style="color:var(--success)">ON</div><div class="sub">Model: <span id="m-model">—</span></div></div>
-    <div class="card metric"><h3>Messages</h3><div class="big" id="m-msgs">0</div><div class="sub"><span id="m-in">0</span> in · <span id="m-out">0</span> out</div></div>
-  </div>
-  <div class="grid g23">
-    <div class="card"><h3>Recent Messages</h3><div class="msg-list" id="recentMsgs"><div class="empty">Loading...</div></div></div>
-    <div class="card"><h3>Live Logs</h3><div id="overviewLogs" style="max-height:430px;overflow-y:auto;font-family:monospace;font-size:11px"></div></div>
-  </div>
-</div>
-
-<!-- SESSIONS -->
-<div class="page" id="page-sessions">
-  <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px">
-    <h2 style="font-size:16px;font-weight:700">OpenWA Sessions</h2>
-    <div style="display:flex;gap:8px">
-      <button class="btn primary" onclick="loadSessions()">Refresh</button>
-      <button class="btn success" onclick="saveSessionRouting()">Save Routing</button>
+<!-- APP -->
+<div id="appView" class="hidden">
+  <div class="sidebar">
+    <div class="brand"><div class="logo">W</div><span>OpenBridge</span></div>
+    <div class="nav-item active" data-view="overview"><span>◉</span><span>Overview</span></div>
+    <div class="nav-item" data-view="characters"><span>◈</span><span>Characters</span></div>
+    <div class="nav-item" data-view="sessions"><span>✉</span><span>Sessions</span></div>
+    <div class="nav-item" data-view="webhooks"><span>↗</span><span>Webhooks</span></div>
+    <div class="nav-item" data-view="settings"><span>⚙</span><span>Settings</span></div>
+    <div class="user">
+      <strong id="meName">—</strong>
+      <div class="email" id="meEmail">—</div>
+      <div style="margin-top:10px"><button class="btn sm" onclick="logout()">Logout</button></div>
     </div>
   </div>
-  <div class="card section">
-    <h3>Discovered sessions <span class="sub-inline">Each WhatsApp number linked in OpenWA is a session. Assign a character to each — unassigned sessions use the default character.</span></h3>
-    <table>
-      <thead><tr>
-        <th>Name</th><th>Status</th><th>Phone</th><th>Webhook</th><th>Last Activity</th><th>Character</th>
-      </tr></thead>
-      <tbody id="sessionRows"><tr><td colspan="6"><div class="empty">Loading sessions...</div></td></tr></tbody>
-    </table>
-  </div>
-</div>
 
-<!-- WEBHOOKS -->
-<div class="page" id="page-webhooks">
-  <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px">
-    <h2 style="font-size:16px;font-weight:700">Character Webhooks</h2>
-    <div style="display:flex;gap:8px;align-items:center">
-      <select id="whSessionSelect" style="min-width:220px"><option value="">Choose session...</option></select>
-      <button class="btn primary" onclick="registerAllWebhooks()">Register all on session</button>
-      <button class="btn" onclick="loadWebhooks()">Refresh</button>
+  <div class="main">
+    <!-- OVERVIEW -->
+    <div id="view-overview">
+      <div class="page-title">Overview <span class="sub" id="ovSub"></span></div>
+      <div class="grid4">
+        <div class="card metric"><h3>Messages</h3><div class="big" id="mMsgs">0</div><div class="sub"><span id="mIn">0</span> in · <span id="mOut">0</span> out</div></div>
+        <div class="card metric"><h3>Characters</h3><div class="big" id="mChars">0</div><div class="sub">personas</div></div>
+        <div class="card metric"><h3>Sessions</h3><div class="big" id="mSess">0</div><div class="sub">linked WhatsApp</div></div>
+        <div class="card metric"><h3>LLM calls</h3><div class="big" id="mLlm">0</div><div class="sub">replies generated</div></div>
+      </div>
+      <div class="card"><h3>Your webhook URL</h3>
+        <div class="wb-url">
+          <input id="genUrl" readonly>
+          <button class="btn sm" onclick="copyText(document.getElementById('genUrl').value)">Copy</button>
+        </div>
+        <div style="font-size:11px;color:var(--muted);margin-top:8px">Paste this in OpenWA → Session → Webhooks → New Webhook. Messages route via session/character assignment.</div>
+      </div>
+      <div class="grid2">
+        <div class="card"><h3>Recent Messages</h3><div class="msg-list" id="recentMsgs"><div class="empty">Loading...</div></div></div>
+        <div class="card"><h3>Live Logs</h3><div class="logs" id="overviewLogs"></div></div>
+      </div>
     </div>
-  </div>
-  <div class="card section">
-    <h3>Generic webhook <span class="sub-inline">Uses session → chat → default character routing</span></h3>
-    <table>
-      <tbody id="whGenericRow"></tbody>
-    </table>
-  </div>
-  <div class="card section">
-    <h3>Per-character webhooks <span class="sub-inline">Messages arriving on a character's URL are handled by that character, regardless of session/chat</span></h3>
-    <table>
-      <thead><tr><th>Character</th><th>Webhook URL</th><th>Copy</th><th>Register on session</th></tr></thead>
-      <tbody id="whRows"><tr><td colspan="4"><div class="empty">Loading webhooks...</div></td></tr></tbody>
-    </table>
-  </div>
-  <div class="card section">
-    <h3>How it works</h3>
-    <p style="font-size:12px;line-height:1.8;color:var(--muted)">
-      1. Each active character has a unique webhook URL like <code style="color:var(--accent)">/webhook/barsha</code>.<br>
-      2. Add it in OpenWA: <em>Session → Webhooks → New Webhook</em>, paste the URL, and set the same secret as the bridge (<code style="color:var(--accent)">.env → WEBHOOK_SECRET</code>).<br>
-      3. Any message delivered through that URL is answered by that character — no chat routing needed.<br>
-      4. "Register on session" adds the URL to OpenWA automatically using the bridge's API key.<br>
-      5. The generic <code style="color:var(--accent)">/webhook</code> still routes via session → chat → default priority.
-    </p>
-  </div>
-</div>
 
-<!-- CHARACTERS -->
-<div class="page" id="page-characters">
-  <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px">
-    <h2 style="font-size:16px;font-weight:700">Character Profiles</h2>
-    <div style="display:flex;gap:8px">
-      <button class="btn primary" onclick="addCharacter()">+ New Character</button>
-      <button class="btn success" onclick="saveAllCharacters()">Save All</button>
+    <!-- CHARACTERS -->
+    <div id="view-characters" class="hidden">
+      <div class="page-title">Characters <span class="sub">Create unlimited personas; each can get its own webhook URL</span>
+        <button class="btn primary" onclick="newCharacter()">+ New Character</button></div>
+      <div id="charList"></div>
     </div>
-  </div>
-  <div id="charList" class="grid g2"></div>
-</div>
 
-<!-- SETTINGS -->
-<div class="page" id="page-settings">
-  <div class="grid g2 section">
-    <div class="card">
-      <h3>LLM & Bridge Settings <button class="btn primary sm" onclick="saveSettings()">Save</button></h3>
-      <div class="field"><label>LLM Model</label><input type="text" id="s-model" placeholder="e.g. antigravity/gpt-oss-120b-medium or big-pickle"></div>
-      <div class="field"><label>Fallback Model</label><input type="text" id="s-fallbackModel" placeholder="e.g. auto"></div>
-      <div class="field"><label>Default Character</label><input type="text" id="s-defaultCharacter" placeholder="character id"></div>
-      <div class="field"><label>Memory Limit (messages per chat)</label><input type="number" id="s-memoryLimit"></div>
-      <div class="field"><label>Max LLM Tokens</label><input type="number" id="s-maxTokens"></div>
-      <div class="field"><label>Reply Hard Cap (chars)</label><input type="number" id="s-replyHardCap"></div>
+    <!-- SESSIONS -->
+    <div id="view-sessions" class="hidden">
+      <div class="page-title">Sessions <span class="sub">Connect each of your OpenWA sessions to a character</span>
+        <button class="btn primary" onclick="loadSessions(true)">Refresh from OpenWA</button></div>
+      <div class="card">
+        <h3>Discovered sessions</h3>
+        <table><thead><tr><th>Name</th><th>Status</th><th>Phone</th><th>Character</th><th>Webhooks</th></tr></thead>
+        <tbody id="sessionRows"><tr><td colspan="5"><div class="empty">Loading...</div></td></tr></tbody></table>
+      </div>
     </div>
-    <div class="card">
-      <h3>Typing Simulation <button class="btn primary sm" onclick="saveSettings()">Save</button></h3>
-      <div class="field"><label>Read Delay Min (ms)</label><input type="number" id="s-readMin"></div>
-      <div class="field"><label>Read Delay Max (ms)</label><input type="number" id="s-readMax"></div>
-      <div class="field"><label>False Start Chance (0–1)</label><input type="number" id="s-falseStart" step="0.05"></div>
-      <div class="field"><label>Min Typing Duration (ms)</label><input type="number" id="s-minTyping"></div>
-      <div class="field"><label>Max Typing Duration (ms)</label><input type="number" id="s-maxTyping"></div>
+
+    <!-- WEBHOOKS -->
+    <div id="view-webhooks" class="hidden">
+      <div class="page-title">Webhooks <span class="sub">Authenticated URLs — the token is your security</span>
+        <button class="btn danger" onclick="regenerateToken()">Regenerate Token</button></div>
+      <div class="card">
+        <h3>Generic webhook</h3>
+        <table><tbody id="genWebhookRow"></tbody></table>
+      </div>
+      <div class="card">
+        <h3>Per-character webhooks</h3>
+        <table><thead><tr><th>Character</th><th>URL</th><th>Copy</th></tr></thead><tbody id="charWebhookRows"></tbody></table>
+        <div style="font-size:11px;color:var(--muted);margin-top:8px">Create a webhook in OpenWA per character — messages on that URL are answered by that character only.</div>
+      </div>
     </div>
-  </div>
-  <div class="card section">
-    <h3>System Prompt — Default Character</h3>
-    <div class="prompt-box" id="s-prompt">Loading...</div>
-  </div>
-</div>
 
-<!-- MESSAGES -->
-<div class="page" id="page-messages">
-  <div style="display:flex;gap:10px;margin-bottom:14px;align-items:center">
-    <select id="chatSelect" style="flex:1"><option value="">Select a chat...</option></select>
-    <button class="btn primary" onclick="loadChatHistory()">Load</button>
-    <span style="font-size:11px;color:var(--muted)" id="msgCount"></span>
-  </div>
-  <div class="card"><div class="chat-thread" id="chatThread"><div class="empty">Select a chat</div></div></div>
-</div>
-
-<!-- LOGS -->
-<div class="page" id="page-logs">
-  <div class="card"><h3>Bridge Logs — Full</h3>
-    <div id="fullLogs" style="max-height:650px;overflow-y:auto;font-family:'SF Mono',Monaco,monospace;font-size:11px;line-height:1.9"></div>
-  </div>
-</div>
-
-<!-- TYPING -->
-<div class="page" id="page-typing">
-  <div class="card"><h3>Typing Flow Visualization</h3>
-    <div style="padding:4px 0">
-      <div class="typing-step"><div class="num">1</div><div><strong>Read message</strong> — 2–5s<div class="bar" style="width:40%;background:var(--muted)"></div></div></div>
-      <div class="typing-step"><div class="num">2</div><div><strong>Start typing...</strong> — 1.5–3.5s<div class="bar" style="width:30%;background:var(--accent)"></div></div></div>
-      <div class="typing-step"><div class="num">3</div><div><strong>DELETE everything</strong> — 1.5–4s pause (thinking)<div class="bar" style="width:35%;background:var(--danger)"></div></div></div>
-      <div class="typing-step"><div class="num">4</div><div><strong>False start (35%)</strong> — type→delete again 1–2.5s<div class="bar" style="width:25%;background:var(--warning)"></div></div></div>
-      <div class="typing-step"><div class="num">5</div><div><strong>Final typing</strong> — 2–8s<div class="bar" style="width:60%;background:var(--success)"></div></div></div>
-      <div class="typing-step"><div class="num">6</div><div><strong>Re-read before send</strong> — 0.4–1.2s<div class="bar" style="width:12%;background:var(--link)"></div></div></div>
-      <div class="typing-step"><div class="num">7</div><div><strong>Message delivered</strong> ✓<div class="bar" style="width:4%;background:var(--success)"></div></div></div>
+    <!-- SETTINGS -->
+    <div id="view-settings" class="hidden">
+      <div class="page-title">Settings <span class="sub">Connect your OpenWA + choose LLM model</span>
+        <button class="btn success" onclick="saveSettings()">Save Settings</button></div>
+      <div class="grid2">
+        <div class="card">
+          <h3>OpenWA connection</h3>
+          <label>OpenWA Base URL</label><input id="sOpenwaBase" placeholder="http://localhost:2785">
+          <label>OpenWA API Key</label><input id="sOpenwaKey" placeholder="owa_k1_...">
+          <label>Webhook Secret (HMAC, optional)</label><input id="sWebhookSecret" placeholder="leave empty to skip HMAC">
+        </div>
+        <div class="card">
+          <h3>LLM</h3>
+          <label>Model</label><input id="sModel" placeholder="big-pickle">
+          <label>Fallback Model</label><input id="sFallback" placeholder="auto">
+          <label>Max Tokens</label><input id="sMaxTokens" type="number">
+          <label>Reply Hard Cap (chars)</label><input id="sHardCap" type="number">
+          <label>Memory Limit (msgs/chat)</label><input id="sMemory" type="number">
+        </div>
+      </div>
+      <div class="card">
+        <h3>Typing simulation</h3>
+        <div class="grid4">
+          <div><label>Read delay min (ms)</label><input id="sReadMin" type="number"></div>
+          <div><label>Read delay max (ms)</label><input id="sReadMax" type="number"></div>
+          <div><label>False start chance</label><input id="sFalseStart" type="number" step="0.05"></div>
+          <div><label>Min typing (ms)</label><input id="sMinTyping" type="number"></div>
+        </div>
+        <div style="display:flex;align-items:center;gap:10px;margin-top:14px">
+          <label style="margin:0">Max typing (ms)</label><input id="sMaxTyping" type="number" style="width:180px">
+          <label style="margin:0" class="flex"><input id="sTypingEnabled" type="checkbox" style="width:auto"> Enabled</label>
+          <label style="margin:0" class="flex"><input id="sAutoRegister" type="checkbox" style="width:auto"> Auto-register webhooks</label>
+        </div>
+      </div>
     </div>
-  </div>
-</div>
-
-<!-- ARCHITECTURE -->
-<div class="page" id="page-architecture">
-  <div class="card"><h3>System Architecture</h3>
-    <pre style="font-size:12px;color:var(--accent2);line-height:1.7;overflow-x:auto;background:var(--bg);padding:16px;border-radius:10px;border:1px solid var(--border)">
-┌──────────────┐     ┌─────────────────────────┐     ┌─────────────────────┐     ┌─────────────────┐
-│   WhatsApp   │────▶│      OpenWA Server      │────▶│   Bridge (Node.js)  │────▶│    OmniRoute    │
-│    User      │◀────│   port 2785 (Docker)    │◀────│     port 3001       │◀────│   port 20128    │
-└──────────────┘     └─────────────────────────┘     └─────────────────────┘     └─────────────────┘
-
-  Characters: characters.json (editable via dashboard)
-  Settings:    settings.json  (editable via dashboard)
-  Secrets:     .env           (API keys, webhook secret)
-    </pre>
   </div>
 </div>
 
 <div class="toast" id="toast"></div>
-
-<script>
-var API='http://localhost:2785/api', BRIDGE='http://localhost:3001';
-var KEY='owa_k1_923a6a3a9ef0073d4ecd7e8eddd333a1fde118872ceed5c3d356c5016109ec28';
-var sessionId=null,refreshTimer=null,charactersData=null;
-
-document.querySelectorAll('.tab').forEach(function(t){
-  t.onclick=function(){
-    document.querySelectorAll('.tab').forEach(function(x){x.classList.remove('active')});
-    document.querySelectorAll('.page').forEach(function(x){x.classList.remove('active')});
-    t.classList.add('active');
-    document.getElementById('page-'+t.dataset.page).classList.add('active');
-  };
-});
-
-function $(id,txt){var el=document.getElementById(id);if(el)el.textContent=txt;}
-function dot(id,ok){var el=document.getElementById(id);if(el)el.className='dot '+(ok==='ok'?'on':ok==='warn'?'warn':'off');}
-function toast(msg){var t=document.getElementById('toast');t.textContent=msg;t.classList.add('show');setTimeout(function(){t.classList.remove('show')},2500);}
-function esc(s){return String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');}
-
-async function f(url,opts){try{var r=await fetch(url,opts);if(!r.ok)return null;return r.json();}catch{return null}}
-
-function rLogs(id,lines){
-  var el=document.getElementById(id);if(!el)return;
-  el.innerHTML=lines.map(function(l){
-    var tag='',cls='t-bridge';
-    if(l.indexOf('[msg]')>=0){cls='t-msg';tag='MSG';}
-    else if(l.indexOf('[llm]')>=0){cls='t-llm';tag='LLM';}
-    else if(l.indexOf('[send]')>=0){cls='t-send';tag='SEND';}
-    else if(l.indexOf('failed:')>=0){cls='t-err';tag='ERR';}
-    else if(l.indexOf('[memory]')>=0){cls='t-mem';tag='MEM';}
-    else if(l.indexOf('[typing]')>=0){cls='t-typ';tag='TYP';}
-    else if(l.indexOf('[bridge]')>=0){tag='INF';}
-    return '<div class="log-line"><span class="tag '+cls+'">'+(tag?'['+tag+']':'')+'</span>'+esc(l.replace(/^\[.*?\]\s*/,''))+'</div>';
-  }).join('');
-  el.scrollTop=el.scrollHeight;
-}
-
-// ── REFRESH ALL ──
-async function refreshAll(){
-  try{
-    var cfg=await fetch(BRIDGE+'/config').then(function(r){return r.json()}).catch(function(){return null});
-    if(cfg){$('s-prompt',cfg.systemPrompt||'No default character set');$('m-model',cfg.model);}
-
-    var bh=await fetch(BRIDGE+'/health').then(function(r){return r.json()}).catch(function(){return null});
-    dot('dotBridge',bh&&bh.ok?'ok':'off');$('dotBridgeLabel',bh&&bh.ok?'3001':'DOWN');
-    $('m-bridge',bh&&bh.ok?'ON':'OFF');$('m-bridge').style.color=bh&&bh.ok?'var(--success)':'var(--danger)';
-
-    var sessions=await f(BRIDGE+'/sessions');
-    var sessList=sessions?sessions.sessions:[];
-    dot('dotOpenwa',sessList.length?'ok':'off');$('dotOpenwaLabel',sessList.length?'2785':'DOWN');
-    if(sessList.length){
-      var connected=sessList.filter(function(x){return x.status==='ready'||x.status==='active'}).length;
-      var s=sessList[0];sessionId=s.id;
-      var ready=s.status==='ready'||s.status==='active';
-      dot('dotSession',sessList.length>1?(connected? 'ok':'warn'):(ready?'ok':'warn'));
-      $('dotSessionLabel',(sessList.length>1?connected+'/'+sessList.length+' ':'')+s.name+' · '+s.status);
-      $('m-session',sessList.length>1?connected+'/'+sessList.length+' connected':(ready?'READY':s.status));
-      $('m-session').style.color=connected||ready?'var(--success)':'var(--warning)';
-      $('m-session-sub',sessList.map(function(x){return x.name}).join(', '));
-    }
-
-    var omniOk=false;try{await fetch('http://localhost:20128/api/monitoring/health');omniOk=true;}catch{}
-    dot('dotOmni',omniOk?'ok':'off');$('dotOmniLabel',omniOk?'20128':'DOWN');
-    $('m-omni',omniOk?'ON':'OFF');$('m-omni').style.color=omniOk?'var(--success)':'var(--danger)';
-
-    if(sessionId){
-      var msgs=await f(API+'/sessions/'+sessionId+'/messages?limit=100');
-      if(msgs){
-        var list=Array.isArray(msgs)?msgs:msgs.messages||[];
-        $('m-msgs',list.length);$('m-in',list.filter(function(m){return m.direction==='incoming'}).length);$('m-out',list.filter(function(m){return m.direction==='outgoing'}).length);
-        var el=document.getElementById('recentMsgs');el.innerHTML='';
-        list.slice(0,10).forEach(function(m){
-          var d=m.direction==='incoming'?'in':'out';
-          el.innerHTML+='<div class="msg '+d+'"><div class="sender">'+esc(m.chatName||(m.from?m.from.split('@')[0]:'?'))+'</div>'+esc(m.body||'['+m.type+']')+'<div class="meta">'+new Date(m.createdAt).toLocaleTimeString()+'</div></div>';
-        });
-        var chatMap={};list.forEach(function(m){chatMap[m.chatId]=m;});
-        var chats=Object.keys(chatMap);
-        var sel=document.getElementById('chatSelect');var cv=sel.value;
-        sel.innerHTML='<option value="">Select a chat...</option>';
-        chats.forEach(function(cid){sel.innerHTML+='<option value="'+esc(cid)+'"'+(cid===cv?' selected':'')+'>'+esc(chatMap[cid].chatName||cid)+'</option>';});
-      }
-    }
-
-    var lr=await fetch(BRIDGE+'/logs?lines=80').then(function(r){return r.json()}).catch(function(){return{lines:[]}});
-    rLogs('fullLogs',lr.lines||[]);rLogs('overviewLogs',(lr.lines||[]).slice(-18));
-    $('lastRefresh','Updated '+new Date().toLocaleTimeString());
-    loadSessions();
-    loadWebhooks();
-  }catch(e){console.error(e)}
-}
-
-// ── SESSIONS ──
-var sessionRouteSel = {};
-
-async function loadSessions(){
-  var res=await fetch(BRIDGE+'/sessions').then(function(r){return r.json()}).catch(function(){return null});
-  if(!res)return;
-  var list=res.sessions||[];
-  var routing=res.sessionRouting||{};
-  if(!Object.keys(sessionRouteSel).length){Object.keys(routing).forEach(function(k){sessionRouteSel[k]=routing[k]});}
-  var el=document.getElementById('sessionRows');
-  if(!el)return;
-  if(!list.length){el.innerHTML='<tr><td colspan="6"><div class="empty">No sessions found. Scan a QR in OpenWA (http://localhost:2785) first.</div></td></tr>';return;}
-  el.innerHTML=list.map(function(s){
-    var ready=s.status==='ready'||s.status==='active';
-    var hooked=s.webhook===true?'<span style="color:var(--success)">✓ registered</span>':s.webhook===null?'<span style="color:var(--muted)">—</span>':'<span style="color:var(--danger)">✗ missing</span>';
-    var selVal=sessionRouteSel[s.id]||s.characterId||'';
-    var opts='<option value="">(default)</option>'+(charactersData?charactersData.characters.map(function(c){return '<option value="'+esc(c.id)+'"'+(c.id===selVal?' selected':'')+'>'+esc(c.name)+'</option>'}).join(''):'');
-    var last=s.lastSeen?new Date(s.lastSeen).toLocaleTimeString():'never';
-    return '<tr>'+
-      '<td><strong>'+esc(s.name)+'</strong><div style="font-size:10px;color:var(--muted)">'+esc(s.id)+'</div></td>'+
-      '<td><span class="badge '+(ready?'green':s.status==='qr_ready'?'yellow':'red')+'">'+esc(s.status)+'</span></td>'+
-      '<td>'+esc(s.phone||'—')+'</td>'+
-      '<td>'+hooked+'</td>'+
-      '<td>'+last+'</td>'+
-      '<td><select onchange="onSessionRouteChange(\''+esc(s.id)+'\',this.value)">'+opts+'</select></td>'+
-    '</tr>';
-  }).join('');
-}
-
-function onSessionRouteChange(id,val){
-  if(val)sessionRouteSel[id]=val;else delete sessionRouteSel[id];
-}
-
-async function saveSessionRouting(){
-  var r=await fetch(BRIDGE+'/sessions',{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({sessionRouting:sessionRouteSel})});
-  if(r.ok){toast('Session routing saved!');loadSessions();}else{toast('Save failed!');}
-}
-
-// ── WEBHOOKS ──
-function copyWebhook(url){
-  (navigator.clipboard?navigator.clipboard.writeText(url):Promise.reject()).then(function(){toast('Copied!')}).catch(function(){
-    var t=document.createElement('textarea');t.value=url;document.body.appendChild(t);t.select();document.execCommand('copy');t.remove();toast('Copied!');
-  });
-}
-
-async function loadWebhooks(){
-  var res=await fetch(BRIDGE+'/webhooks').then(function(r){return r.json()}).catch(function(){return null});
-  if(!res)return;
-  var rows=res.webhooks||[];
-  document.getElementById('whGenericRow').innerHTML='<tr>'+
-    '<td><strong>All messages (routing)</strong></td>'+
-    '<td><code style="font-size:11px">'+esc(res.generic.url)+'</code></td>'+
-    '<td><button class="btn sm" onclick="copyWebhook(\''+esc(res.generic.url)+'\')">Copy</button></td>'+
-    '<td></td></tr>';
-  document.getElementById('whRows').innerHTML=rows.map(function(w){
-    return '<tr>'+
-      '<td><strong>'+esc(w.characterName)+'</strong><div style="font-size:10px;color:var(--muted)">'+esc(w.characterId)+'</div></td>'+
-      '<td><code style="font-size:11px">'+esc(w.url)+'</code></td>'+
-      '<td><button class="btn sm" onclick="copyWebhook(\''+esc(w.url)+'\')">Copy</button></td>'+
-      '<td><button class="btn sm primary" onclick="registerWebhook(\''+esc(w.characterId)+'\')">Register</button></td>'+
-    '</tr>';
-  }).join('');
-  // populate session select
-  var sels=document.getElementById('whSessionSelect');var cv=sels.value;
-  var sessRes=await fetch(BRIDGE+'/sessions').then(function(r){return r.json()}).catch(function(){return null});
-  if(sessRes){
-    sels.innerHTML='<option value="">Choose session...</option>'+
-      (sessRes.sessions||[]).map(function(s){return '<option value="'+esc(s.id)+'"'+(s.id===cv?' selected':'')+'>'+esc(s.name)+' · '+esc(s.status)+'</option>'}).join('');
-  }
-}
-
-async function registerWebhook(characterId){
-  var sessionId=document.getElementById('whSessionSelect').value;
-  if(!sessionId){toast('Choose a session first');return;}
-  var r=await fetch(BRIDGE+'/webhooks/register',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({sessionId:sessionId,characterIds:[characterId]})});
-  if(r.ok){toast('Registered '+characterId+' webhook on session');loadSessions();}else{toast('Register failed!');}
-}
-
-async function registerAllWebhooks(){
-  var sessionId=document.getElementById('whSessionSelect').value;
-  if(!sessionId){toast('Choose a session first');return;}
-  var r=await fetch(BRIDGE+'/webhooks/register',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({sessionId:sessionId})});
-  if(r.ok){toast('Registered all webhooks on session');loadSessions();}else{toast('Register failed!');}
-}
-
-// ── CHARACTERS ──
-async function loadCharacters(){
-  var chars=await fetch(BRIDGE+'/characters').then(function(r){return r.json()}).catch(function(){return null});
-  if(!chars)return;
-  charactersData=chars;
-  var el=document.getElementById('charList');el.innerHTML='';
-  (chars.characters||[]).forEach(function(c,i){
-    var isActive=c.active!==false;
-    var isDefault=c.id===charactersData.defaultCharacter;
-    var cls='char-card'+(isActive?' active':'')+(isDefault?' is-default':'');
-    el.innerHTML+='<div class="'+cls+'" id="char-'+i+'">'+
-      '<h3 style="font-size:14px;margin-bottom:12px">'+esc(c.name)+' <span class="badge '+(isActive?'green':'red')+'">'+(isActive?'active':'inactive')+'</span>'+
-      (isDefault?'<span class="badge green">DEFAULT</span>':'')+'</h3>'+
-      '<div class="field"><label>ID</label><input type="text" value="'+esc(c.id)+'" data-i="'+i+'" data-f="id"></div>'+
-      '<div class="field"><label>Name</label><input type="text" value="'+esc(c.name)+'" data-i="'+i+'" data-f="name"></div>'+
-      '<div class="field"><label>Tagline</label><input type="text" value="'+esc(c.tagline||'')+'" data-i="'+i+'" data-f="tagline"></div>'+
-      '<div class="field"><label>Greeting</label><input type="text" value="'+esc(c.greeting||'')+'" data-i="'+i+'" data-f="greeting" placeholder="First message shown when new chat starts"></div>'+
-      '<div class="config-row"><span class="cl">Tags</span><input type="text" value="'+esc((c.tags||[]).join(', '))+'" data-i="'+i+'" data-f="tags" placeholder="actress, model, nepali"></div>'+
-      '<div class="config-row"><span class="cl">Visibility</span><select data-i="'+i+'" data-f="visibility">'+
-        '<option value="public"'+(c.visibility==='public'?' selected':'')+'>Public</option>'+
-        '<option value="private"'+(c.visibility!=='public'?' selected':'')+'>Private</option>'+
-        '<option value="unlisted"'+(c.visibility==='unlisted'?' selected':'')+'>Unlisted</option>'+
-      '</select></div>'+
-      '<div class="field"><label>Languages</label><input type="text" value="'+esc((c.languages||[]).join(', '))+'" data-i="'+i+'" data-f="languages"></div>'+
-      '<div class="field"><label>Personality</label><textarea rows="3" data-i="'+i+'" data-f="personality">'+esc(c.personality||'')+'</textarea></div>'+
-      '<div class="field"><label>Reply Style</label><textarea rows="2" data-i="'+i+'" data-f="replyStyle">'+esc(c.replyStyle||'')+'</textarea></div>'+
-      '<div class="field"><label>Bio</label><textarea rows="4" data-i="'+i+'" data-f="bio">'+esc(c.bio||'')+'</textarea></div>'+
-      '<div class="field"><label>Extra Rules</label><textarea rows="2" data-i="'+i+'" data-f="extraRules">'+esc(c.extraRules||'')+'</textarea></div>'+
-      '<div class="field"><label>Example Messages (one per line, format: user: ... / assistant: ...)</label><textarea rows="4" data-i="'+i+'" data-f="exampleMessages" placeholder="user: k cha?&#10;assistant: cha ni, k garnu 😊">'+esc(renderExamples(c.exampleMessages))+'</textarea></div>'+
-      '<div class="config-row"><span class="cl">Active</span><input type="checkbox" '+(isActive?'checked':'')+' data-i="'+i+'" data-f="active" style="width:auto"></div>'+
-      '<div class="config-row"><span class="cl">Default</span><input type="radio" name="defaultChar" '+(isDefault?'checked':'')+' data-i="'+i+'" data-f="default" style="width:auto"></div>'+
-      '<div style="margin-top:10px;display:flex;gap:8px"><button class="btn danger sm" onclick="removeCharacter('+i+')">Delete</button></div>'+
-    '</div>';
-  });
-}
-
-function addCharacter(){
-  if(!charactersData)charactersData={characters:[],chatRouting:{}};
-  var id='char_'+Date.now();
-  charactersData.characters.push({id:id,name:'New Character',tagline:'',greeting:'',tags:[],visibility:'private',active:true,default:false,languages:['English'],personality:'',replyStyle:'',bio:'',extraRules:'',exampleMessages:[],typingProfile:{}});
-  saveAllCharacters();
-}
-
-function renderExamples(examples){
-  return (examples||[]).map(function(m){return (m.role||'user')+': '+m.content}).join('\n');
-}
-
-function removeCharacter(i){
-  if(!charactersData)return;
-  charactersData.characters.splice(i,1);
-  saveAllCharacters();
-}
-
-async function saveAllCharacters(){
-  if(!charactersData)return;
-  // read all form values back
-  document.querySelectorAll('[data-i]').forEach(function(el){
-    var i=parseInt(el.getAttribute('data-i'));
-    var f=el.getAttribute('data-f');
-    if(!charactersData.characters[i])return;
-    if(f==='id')charactersData.characters[i].id=el.value.trim();
-    else if(f==='name')charactersData.characters[i].name=el.value.trim();
-    else if(f==='tagline')charactersData.characters[i].tagline=el.value.trim();
-    else if(f==='greeting')charactersData.characters[i].greeting=el.value.trim();
-    else if(f==='tags')charactersData.characters[i].tags=el.value.split(',').map(function(s){return s.trim()}).filter(Boolean);
-    else if(f==='visibility')charactersData.characters[i].visibility=el.value;
-    else if(f==='languages')charactersData.characters[i].languages=el.value.split(',').map(function(s){return s.trim()}).filter(Boolean);
-    else if(f==='personality')charactersData.characters[i].personality=el.value;
-    else if(f==='replyStyle')charactersData.characters[i].replyStyle=el.value;
-    else if(f==='bio')charactersData.characters[i].bio=el.value;
-    else if(f==='extraRules')charactersData.characters[i].extraRules=el.value;
-    else if(f==='exampleMessages')charactersData.characters[i].exampleMessages=el.value.split('\n').map(function(l){var m=l.match(/^(user|assistant|character):\s?(.*)$/i);if(!m)return null;return {role:m[1].toLowerCase()==='user'?'user':'assistant',content:m[2]};}).filter(Boolean);
-    else if(f==='active')charactersData.characters[i].active=el.checked;
-    else if(f==='default'&&el.checked)charactersData.defaultCharacter=charactersData.characters[i].id;
-  });
-  var r=await fetch(BRIDGE+'/characters',{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify(charactersData)});
-  if(r.ok){toast('Characters saved!');loadCharacters();}else{toast('Save failed!');}
-}
-
-// ── SETTINGS ──
-async function loadSettings(){
-  var s=await fetch(BRIDGE+'/settings').then(function(r){return r.json()}).catch(function(){return null});
-  if(!s)return;
-  $('s-model',s.model||'');$('s-fallbackModel',s.fallbackModel||'');
-  $('s-defaultCharacter',s.defaultCharacter||'');$('s-memoryLimit',s.memoryLimit||40);
-  $('s-maxTokens',s.maxTokens||80);$('s-replyHardCap',s.replyHardCap||120);
-  if(s.typing){
-    $('s-readMin',s.typing.readDelayMs?.[0]||2000);$('s-readMax',s.typing.readDelayMs?.[1]||5000);
-    $('s-falseStart',s.typing.falseStartChance||0.35);
-    $('s-minTyping',s.typing.minTypingMs||2000);$('s-maxTyping',s.typing.maxTypingMs||8000);
-  }
-}
-
-async function saveSettings(){
-  var s={
-    model:document.getElementById('s-model').value,
-    fallbackModel:document.getElementById('s-fallbackModel').value,
-    defaultCharacter:document.getElementById('s-defaultCharacter').value,
-    memoryLimit:parseInt(document.getElementById('s-memoryLimit').value)||40,
-    maxTokens:parseInt(document.getElementById('s-maxTokens').value)||80,
-    replyHardCap:parseInt(document.getElementById('s-replyHardCap').value)||120,
-    typing:{
-      readDelayMs:[parseInt(document.getElementById('s-readMin').value)||2000,parseInt(document.getElementById('s-readMax').value)||5000],
-      falseStartChance:parseFloat(document.getElementById('s-falseStart').value)||0.35,
-      minTypingMs:parseInt(document.getElementById('s-minTyping').value)||2000,
-      maxTypingMs:parseInt(document.getElementById('s-maxTyping').value)||8000
-    }
-  };
-  var r=await fetch(BRIDGE+'/settings',{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify(s)});
-  if(r.ok){toast('Settings saved!');}else{toast('Save failed!');}
-}
-
-// ── MESSAGES ──
-async function loadChatHistory(){
-  var chatId=document.getElementById('chatSelect').value;
-  if(!chatId||!sessionId)return;
-  var msgs=await f(API+'/sessions/'+sessionId+'/messages?chatId='+encodeURIComponent(chatId)+'&limit=100');
-  var el=document.getElementById('chatThread');
-  var list=Array.isArray(msgs)?msgs:(msgs&&msgs.messages?msgs.messages:[]);
-  document.getElementById('msgCount').textContent=list.length+' messages';
-  if(!list.length){el.innerHTML='<div class="empty">No messages</div>';return;}
-  el.innerHTML='';
-  list.slice().reverse().forEach(function(m){
-    var d=m.direction==='incoming'?'in':'out';
-    var sender=m.direction==='incoming'?(m.chatName||(m.from?m.from.split('@')[0]:'?')):'You';
-    el.innerHTML+='<div class="msg '+d+'"><div class="sender">'+esc(sender)+'</div>'+esc(m.body||'['+m.type+']')+'<div class="meta">'+new Date(m.createdAt).toLocaleTimeString()+'</div></div>';
-  });
-  el.scrollTop=el.scrollHeight;
-}
-
-document.getElementById('autoRefresh').onchange=function(){if(this.checked)refreshTimer=setInterval(refreshAll,5000);else clearInterval(refreshTimer);};
-refreshAll();loadCharacters();loadSettings();
-refreshTimer=setInterval(refreshAll,5000);
-</script>
+<script src="/app.js"></script>
 </body>
 </html>
