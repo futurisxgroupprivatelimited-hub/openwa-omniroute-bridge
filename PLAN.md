@@ -103,9 +103,17 @@ User types "k cha?"
 
 ### Routing rules
 
-1. If a chatId is in `chatRouting`, use that character.
-2. Otherwise use the character flagged `"default": true`.
-3. Characters can be toggled `active` — inactive ones are never assigned.
+1. If a `sessionId` is in `sessionRouting`, use that character (per-WhatsApp-number).
+2. If a `chatId` is in `chatRouting`, use that character.
+3. Otherwise use the character flagged `"default": true`.
+4. Characters can be toggled `active` — inactive ones are never assigned.
+
+### Multi-session awareness
+
+The bridge discovers all OpenWA sessions (`GET /api/sessions`) on startup and polls every 30s.
+For each session it tracks: name, status (ready/qr_ready/etc.), phone, webhook registration,
+last seen activity, and the character it routes to. Newly discovered sessions get their webhook
+auto-registered. Exposed via `GET /sessions` and surfaced in the dashboard **Sessions** tab.
 
 ---
 
@@ -146,9 +154,11 @@ All timings are per-character editable in `characters.json` → `typingProfile`.
 | Method | Path | Purpose |
 |---|---|---|
 | POST | `/webhook` | OpenWA webhook receiver (HMAC verified) |
-| GET  | `/health` | Liveness + stats |
+| GET  | `/health` | Liveness + stats + session count |
 | GET  | `/logs?lines=N` | Recent bridge logs |
-| GET  | `/config` | Resolved config (settings + active prompt) |
+| GET  | `/config` | Resolved config (settings + active prompt + sessions) |
+| GET  | `/sessions` | Discovered OpenWA sessions (status, webhook, character) |
+| PUT  | `/sessions` | Save session → character routing |
 | GET  | `/characters` | All character profiles |
 | PUT  | `/characters` | Save all characters (persists to disk) |
 | GET  | `/settings` | Current settings |
@@ -164,7 +174,8 @@ All timings are per-character editable in `characters.json` → `typingProfile`.
 - [x] Single-character persona (Barsha Siwakoti)
 - [x] Hyper-realistic typing simulation
 - [x] Multi-character routing (`chatRouting` + default)
-- [x] Dashboard editors for characters + settings
+- [x] Multi-session awareness (discover + auto-register webhooks + per-session routing)
+- [x] Dashboard editors for characters + settings + session routing
 - [x] One-command setup (`setup.sh`) — installs OpenWA + OmniRoute
 - [x] Professional character model (greeting, tags, visibility, examples, version)
 - [x] Full README docs

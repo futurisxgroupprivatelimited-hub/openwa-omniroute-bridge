@@ -17,6 +17,8 @@ const logBuffer = [];
 const MAX_LOGS = 300;
 const dedupe = new Map();
 const stats = { messagesIn: 0, messagesOut: 0, llmCalls: 0, errors: 0, replies: [] };
+const sessions = {};
+const SESSION_POLL_MS = 30000;
 
 function readJsonFile(file, fallback) {
   try {
@@ -61,8 +63,13 @@ function getActiveCharacters() {
   return (chars.characters || []).filter(c => c.active !== false);
 }
 
-function characterForChat(chatId) {
-  const routed = chars.chatRouting?.[chatId];
+function characterForChat(chatId, sessionId) {
+  const sessionRoute = sessionId ? chars.sessionRouting?.[sessionId] : undefined;
+  if (sessionRoute) {
+    const c = getActiveCharacters().find(x => x.id === sessionRoute);
+    if (c) return c;
+  }
+  const routed = chatId ? chars.chatRouting?.[chatId] : undefined;
   if (routed) {
     const c = getActiveCharacters().find(x => x.id === routed);
     if (c) return c;
@@ -157,6 +164,87 @@ function httpJson(method, url, payload, headers = {}) {
 }
 
 const postJson = (url, payload, headers = {}) => httpJson('POST', url, payload, headers);
+
+async function sessionHasBridgeWebhook(sessionId) {
+  try {
+    const { body } = await httpJson('GET', `${OPENWA_BASE}/api/sessions/${encodeURIComponent(sessionId)}/webhooks`, null, { 'X-API-Key': OPENWA_API_KEY });
+    const parsed = JSON.parse(body);
+    const list = Array.isArray(parsed) ? parsed : parsed.webhooks || [];
+    return list.some(w => String(w.url || '').includes(`:${PORT}`));
+  } catch {
+    return null;
+  }
+}
+
+async function refreshSessions() {
+  try {
+    const { body } = await httpJson('GET', `${OPENWA_BASE}/api/sessions`, null, { 'X-API-Key': OPENWA_API_KEY });
+    const parsed = JSON.parse(body);
+    const list = Array.isArray(parsed) ? parsed : parsed.sessions || [];
+    const seen = new Set();
+
+    for (const s of list) {
+      const id = s.id || s.name;
+      if (!id) continue;
+      seen.add(id);
+      const existing = sessions[id];
+      const entry = {
+        id,
+        name: s.name || id,
+        status: s.status || 'unknown',
+        phone: s.phone || '',
+        lastSeen: existing?.lastSeen || null,
+        webhook: existing?.webhook ?? null,
+        characterId: null,
+        characterName: null,
+      };
+      const character = characterForChat(null, id);
+      entry.characterId = character?.id || null;
+      entry.characterName = character?.name || null;
+      sessions[id] = entry;
+
+      if (!existing) {
+        log(`[sessions] discovered ${id} (${entry.status}) — routed to ${entry.characterName || 'default'}`);
+        sessionHasBridgeWebhook(id).then(async hooked => {
+          if (!sessions[id]) return;
+          sessions[id].webhook = hooked;
+          if (hooked === false) {
+            try {
+              await postJson(
+                `${OPENWA_BASE}/api/sessions/${encodeURIComponent(id)}/webhooks`,
+                { url: `http://host.docker.internal:${PORT}/webhook`, events: ['message.received'], secret: WEBHOOK_SECRET },
+                { 'X-API-Key': OPENWA_API_KEY }
+              );
+              sessions[id].webhook = true;
+              log(`[sessions] ${id} webhook auto-registered ✓`);
+            } catch (e) {
+              log(`[sessions] ${id} webhook auto-register failed: ${e.message}`);
+            }
+          } else {
+            log(`[sessions] ${id} webhook ${hooked === true ? 'registered ✓' : 'unknown'}`);
+          }
+        });
+      } else if (existing.status !== entry.status) {
+        log(`[sessions] ${id} status: ${existing.status} -> ${entry.status}`);
+      }
+    }
+
+    for (const id of Object.keys(sessions)) {
+      if (!seen.has(id)) sessions[id].status = 'gone';
+    }
+  } catch (e) {
+    log(`[sessions] refresh failed: ${e.message}`);
+  }
+}
+
+function sessionSeen(sessionId) {
+  if (!sessionId) return;
+  const s = sessions[sessionId] || (sessions[sessionId] = { id: sessionId, name: sessionId, status: 'active', phone: '', webhook: true, characterId: null, characterName: null });
+  s.lastSeen = Date.now();
+  const character = characterForChat(null, sessionId);
+  s.characterId = character?.id || null;
+  s.characterName = character?.name || null;
+}
 
 async function sendTypingState(sessionId, chatId, state) {
   try {
@@ -281,7 +369,8 @@ function handleMessage(event) {
   const chatId = data.chatId || data.from;
   if (!chatId) return;
   const sessionId = event.sessionId;
-  const character = characterForChat(chatId);
+  sessionSeen(sessionId);
+  const character = characterForChat(chatId, sessionId);
 
   stats.messagesIn++;
   log(`[msg] ${sessionId} <- ${chatId}: ${text.slice(0, 80)} (char: ${character ? character.name : 'NONE'})`);
@@ -333,7 +422,15 @@ const server = http.createServer(async (req, res) => {
 
   // Health
   if (req.method === 'GET' && p === '/health') {
-    json(res, 200, { ok: true, service: 'openwa-omniroute-bridge', memoryLimit: data.memoryLimit, model: data.model, stats });
+    json(res, 200, {
+      ok: true,
+      service: 'openwa-omniroute-bridge',
+      memoryLimit: data.memoryLimit,
+      model: data.model,
+      sessions: Object.values(sessions).length,
+      sessionsConnected: Object.values(sessions).filter(s => s.status === 'ready' || s.status === 'active').length,
+      stats,
+    });
     return;
   }
 
@@ -341,6 +438,36 @@ const server = http.createServer(async (req, res) => {
   if (req.method === 'GET' && p === '/logs') {
     const lines = Number(url.searchParams.get('lines') || 50);
     json(res, 200, { lines: logBuffer.slice(-lines) });
+    return;
+  }
+
+  // Sessions (discovered from OpenWA + tracked locally)
+  if (req.method === 'GET' && p === '/sessions') {
+    if (url.searchParams.get('refresh') === '1') {
+      try { await refreshSessions(); } catch {}
+    }
+    json(res, 200, {
+      sessions: Object.values(sessions).map(s => ({
+        ...s,
+        lastSeen: s.lastSeen ? new Date(s.lastSeen).toISOString() : null,
+      })),
+      sessionRouting: chars.sessionRouting || {},
+    });
+    return;
+  }
+
+  // Update session -> character routing (e.g. {"sessionId":"barsha"})
+  if (req.method === 'PUT' && p === '/sessions') {
+    try {
+      const raw = await readBody(req);
+      const next = JSON.parse(raw.toString('utf8'));
+      if (!next || typeof next.sessionRouting !== 'object') { json(res, 400, { error: 'sessionRouting object required' }); return; }
+      chars.sessionRouting = next.sessionRouting;
+      writeJsonFile(CHARACTERS_FILE, chars);
+      log('[bridge] session routing updated via dashboard');
+      await refreshSessions();
+      json(res, 200, { ok: true, sessionRouting: chars.sessionRouting });
+    } catch (e) { json(res, 400, { error: e.message }); }
     return;
   }
 
@@ -391,6 +518,7 @@ const server = http.createServer(async (req, res) => {
       omniroute: OMNIRoute_BASE,
       character: character ? { id: character.id, name: character.name } : null,
       systemPrompt: character ? buildSystemPrompt(character) : '',
+      sessions: Object.values(sessions).map(s => ({ id: s.id, name: s.name, status: s.status, characterId: s.characterId, characterName: s.characterName, lastSeen: s.lastSeen ? new Date(s.lastSeen).toISOString() : null })),
       stats,
     });
     return;
@@ -424,4 +552,6 @@ server.listen(PORT, () => {
   log(`[bridge] model: ${data.model} (fallback: ${data.fallbackModel})`);
   log(`[bridge] memory: last ${data.memoryLimit} msgs per chat`);
   log(`[bridge] characters: ${getActiveCharacters().map(c => c.name).join(', ') || 'NONE'}`);
+  refreshSessions();
+  setInterval(refreshSessions, SESSION_POLL_MS).unref?.();
 });

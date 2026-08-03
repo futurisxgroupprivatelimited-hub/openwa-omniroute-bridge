@@ -26,6 +26,7 @@ body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;b
 .grid{display:grid;gap:14px}.g2{grid-template-columns:1fr 1fr}.g3{grid-template-columns:1fr 1fr 1fr}.g4{grid-template-columns:1fr 1fr 1fr 1fr}.g23{grid-template-columns:2fr 1fr}
 .card{background:var(--card);border:1px solid var(--border);border-radius:14px;padding:18px}
 .card h3{font-size:11px;color:var(--muted);text-transform:uppercase;letter-spacing:1.2px;margin-bottom:14px;font-weight:700;display:flex;align-items:center;justify-content:space-between}
+.card h3 .sub-inline{font-size:10px;color:var(--muted);font-weight:400;text-transform:none;letter-spacing:0;margin-left:10px}
 .big{font-size:36px;font-weight:800;letter-spacing:-1px}.sub{font-size:11px;color:var(--muted);margin-top:4px}
 .metric{text-align:center;padding:20px 12px}.section{margin-bottom:20px}
 table{width:100%;border-collapse:collapse}
@@ -84,6 +85,7 @@ label{font-size:12px;font-weight:600;display:block;margin-bottom:4px;color:var(-
 </div>
 <div class="tabs" id="tabBar">
   <div class="tab active" data-page="overview">Overview</div>
+  <div class="tab" data-page="sessions">Sessions</div>
   <div class="tab" data-page="characters">Characters</div>
   <div class="tab" data-page="settings">Settings</div>
   <div class="tab" data-page="messages">Messages</div>
@@ -107,6 +109,26 @@ label{font-size:12px;font-weight:600;display:block;margin-bottom:4px;color:var(-
   <div class="grid g23">
     <div class="card"><h3>Recent Messages</h3><div class="msg-list" id="recentMsgs"><div class="empty">Loading...</div></div></div>
     <div class="card"><h3>Live Logs</h3><div id="overviewLogs" style="max-height:430px;overflow-y:auto;font-family:monospace;font-size:11px"></div></div>
+  </div>
+</div>
+
+<!-- SESSIONS -->
+<div class="page" id="page-sessions">
+  <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px">
+    <h2 style="font-size:16px;font-weight:700">OpenWA Sessions</h2>
+    <div style="display:flex;gap:8px">
+      <button class="btn primary" onclick="loadSessions()">Refresh</button>
+      <button class="btn success" onclick="saveSessionRouting()">Save Routing</button>
+    </div>
+  </div>
+  <div class="card section">
+    <h3>Discovered sessions <span class="sub-inline">Each WhatsApp number linked in OpenWA is a session. Assign a character to each — unassigned sessions use the default character.</span></h3>
+    <table>
+      <thead><tr>
+        <th>Name</th><th>Status</th><th>Phone</th><th>Webhook</th><th>Last Activity</th><th>Character</th>
+      </tr></thead>
+      <tbody id="sessionRows"><tr><td colspan="6"><div class="empty">Loading sessions...</div></td></tr></tbody>
+    </table>
   </div>
 </div>
 
@@ -246,14 +268,18 @@ async function refreshAll(){
     dot('dotBridge',bh&&bh.ok?'ok':'off');$('dotBridgeLabel',bh&&bh.ok?'3001':'DOWN');
     $('m-bridge',bh&&bh.ok?'ON':'OFF');$('m-bridge').style.color=bh&&bh.ok?'var(--success)':'var(--danger)';
 
-    var sessions=await f(API+'/sessions');
-    dot('dotOpenwa',sessions&&sessions.length?'ok':'off');$('dotOpenwaLabel',sessions&&sessions.length?'2785':'DOWN');
-    if(sessions&&sessions.length){
-      var s=sessions[0];sessionId=s.id;
-      var ready=s.status==='ready';
-      dot('dotSession',ready?'ok':'warn');$('dotSessionLabel',s.name+' · '+s.status);
-      $('m-session',s.status);$('m-session').style.color=ready?'var(--success)':'var(--warning)';
-      $('m-session-sub',s.name+' ('+s.phone+')');
+    var sessions=await f(BRIDGE+'/sessions');
+    var sessList=sessions?sessions.sessions:[];
+    dot('dotOpenwa',sessList.length?'ok':'off');$('dotOpenwaLabel',sessList.length?'2785':'DOWN');
+    if(sessList.length){
+      var connected=sessList.filter(function(x){return x.status==='ready'||x.status==='active'}).length;
+      var s=sessList[0];sessionId=s.id;
+      var ready=s.status==='ready'||s.status==='active';
+      dot('dotSession',sessList.length>1?(connected? 'ok':'warn'):(ready?'ok':'warn'));
+      $('dotSessionLabel',(sessList.length>1?connected+'/'+sessList.length+' ':'')+s.name+' · '+s.status);
+      $('m-session',sessList.length>1?connected+'/'+sessList.length+' connected':(ready?'READY':s.status));
+      $('m-session').style.color=connected||ready?'var(--success)':'var(--warning)';
+      $('m-session-sub',sessList.map(function(x){return x.name}).join(', '));
     }
 
     var omniOk=false;try{await fetch('http://localhost:20128/api/monitoring/health');omniOk=true;}catch{}
@@ -281,7 +307,46 @@ async function refreshAll(){
     var lr=await fetch(BRIDGE+'/logs?lines=80').then(function(r){return r.json()}).catch(function(){return{lines:[]}});
     rLogs('fullLogs',lr.lines||[]);rLogs('overviewLogs',(lr.lines||[]).slice(-18));
     $('lastRefresh','Updated '+new Date().toLocaleTimeString());
+    loadSessions();
   }catch(e){console.error(e)}
+}
+
+// ── SESSIONS ──
+var sessionRouteSel = {};
+
+async function loadSessions(){
+  var res=await fetch(BRIDGE+'/sessions').then(function(r){return r.json()}).catch(function(){return null});
+  if(!res)return;
+  var list=res.sessions||[];
+  var routing=res.sessionRouting||{};
+  if(!Object.keys(sessionRouteSel).length){Object.keys(routing).forEach(function(k){sessionRouteSel[k]=routing[k]});}
+  var el=document.getElementById('sessionRows');
+  if(!el)return;
+  if(!list.length){el.innerHTML='<tr><td colspan="6"><div class="empty">No sessions found. Scan a QR in OpenWA (http://localhost:2785) first.</div></td></tr>';return;}
+  el.innerHTML=list.map(function(s){
+    var ready=s.status==='ready'||s.status==='active';
+    var hooked=s.webhook===true?'<span style="color:var(--success)">✓ registered</span>':s.webhook===null?'<span style="color:var(--muted)">—</span>':'<span style="color:var(--danger)">✗ missing</span>';
+    var selVal=sessionRouteSel[s.id]||s.characterId||'';
+    var opts='<option value="">(default)</option>'+(charactersData?charactersData.characters.map(function(c){return '<option value="'+esc(c.id)+'"'+(c.id===selVal?' selected':'')+'>'+esc(c.name)+'</option>'}).join(''):'');
+    var last=s.lastSeen?new Date(s.lastSeen).toLocaleTimeString():'never';
+    return '<tr>'+
+      '<td><strong>'+esc(s.name)+'</strong><div style="font-size:10px;color:var(--muted)">'+esc(s.id)+'</div></td>'+
+      '<td><span class="badge '+(ready?'green':s.status==='qr_ready'?'yellow':'red')+'">'+esc(s.status)+'</span></td>'+
+      '<td>'+esc(s.phone||'—')+'</td>'+
+      '<td>'+hooked+'</td>'+
+      '<td>'+last+'</td>'+
+      '<td><select onchange="onSessionRouteChange(\''+esc(s.id)+'\',this.value)">'+opts+'</select></td>'+
+    '</tr>';
+  }).join('');
+}
+
+function onSessionRouteChange(id,val){
+  if(val)sessionRouteSel[id]=val;else delete sessionRouteSel[id];
+}
+
+async function saveSessionRouting(){
+  var r=await fetch(BRIDGE+'/sessions',{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({sessionRouting:sessionRouteSel})});
+  if(r.ok){toast('Session routing saved!');loadSessions();}else{toast('Save failed!');}
 }
 
 // ── CHARACTERS ──

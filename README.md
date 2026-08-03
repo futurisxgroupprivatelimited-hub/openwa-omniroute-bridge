@@ -47,6 +47,13 @@ After setup, open the dashboard at **http://localhost:3001** and scan the QR at 
 - Toggle characters active/inactive
 - Set a default character for new conversations
 
+### Multi-Session Support
+- Discover all WhatsApp numbers linked in OpenWA automatically
+- Dashboard **Sessions** tab shows every session: status, phone, webhook, last activity
+- Assign a **different character to each session** (e.g. one number acts as Barsha, another as a business bot)
+- Webhooks are **auto-registered** when a new session is discovered — zero manual config
+- Per-chat routing still works within each session
+
 ### Hyper-Realistic Typing
 - 7-step typing pattern based on real human behavior research
 - Type → delete everything → pause to think → maybe false start → type again → re-read → send
@@ -134,6 +141,21 @@ Assign characters to specific chats in the `chatRouting` map:
 
 Chats without an explicit assignment use the character marked `"default": true`.
 
+### Session Routing
+
+Assign characters to entire sessions (one WhatsApp number per session) in the `sessionRouting` map.
+Sessions are discovered automatically from OpenWA — edit routing from the dashboard **Sessions** tab:
+
+```json
+{
+  "sessionRouting": {
+    "7f5935cb-7922-49ad-ba17-8f84e9034f81": "barsha"
+  }
+}
+```
+
+Priority: **session routing** → **chat routing** → **default character**.
+
 ---
 
 ## Settings
@@ -158,9 +180,11 @@ The bridge exposes these endpoints on port 3001:
 | Method | Path | Description |
 |---|---|---|
 | `POST` | `/webhook` | OpenWA webhook receiver (HMAC verified) |
-| `GET` | `/health` | Liveness check + stats |
-| `GET` | `/config` | Resolved config + active system prompt |
+| `GET` | `/health` | Liveness check + stats + session count |
 | `GET` | `/logs?lines=N` | Recent bridge logs |
+| `GET` | `/config` | Resolved config + active prompt + sessions |
+| `GET` | `/sessions` | Discovered OpenWA sessions (status, webhook, character) |
+| `PUT` | `/sessions` | Save session → character routing |
 | `GET` | `/characters` | All character profiles |
 | `PUT` | `/characters` | Save all characters (persists to disk) |
 | `GET` | `/settings` | Current settings |
