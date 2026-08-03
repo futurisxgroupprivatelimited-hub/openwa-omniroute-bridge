@@ -85,6 +85,10 @@ function buildSystemPrompt(character) {
   if (character.personality) parts.push(`PERSONALITY: ${character.personality}`);
   if (character.replyStyle) parts.push(`REPLY STYLE: ${character.replyStyle}`);
   if (character.extraRules) parts.push(`EXTRA RULES: ${character.extraRules}`);
+  if (character.exampleMessages?.length) {
+    const examples = character.exampleMessages.map(m => `${m.role === 'user' ? 'User' : character.name}: ${m.content}`).join('\n');
+    parts.push(`EXAMPLE CONVERSATION (mimic this style):\n${examples}`);
+  }
   parts.push('Always sound like a real human texter, never like a bot.');
   return parts.join('\n');
 }

@@ -299,11 +299,20 @@ async function loadCharacters(){
       (isDefault?'<span class="badge green">DEFAULT</span>':'')+'</h3>'+
       '<div class="field"><label>ID</label><input type="text" value="'+esc(c.id)+'" data-i="'+i+'" data-f="id"></div>'+
       '<div class="field"><label>Name</label><input type="text" value="'+esc(c.name)+'" data-i="'+i+'" data-f="name"></div>'+
+      '<div class="field"><label>Tagline</label><input type="text" value="'+esc(c.tagline||'')+'" data-i="'+i+'" data-f="tagline"></div>'+
+      '<div class="field"><label>Greeting</label><input type="text" value="'+esc(c.greeting||'')+'" data-i="'+i+'" data-f="greeting" placeholder="First message shown when new chat starts"></div>'+
+      '<div class="config-row"><span class="cl">Tags</span><input type="text" value="'+esc((c.tags||[]).join(', '))+'" data-i="'+i+'" data-f="tags" placeholder="actress, model, nepali"></div>'+
+      '<div class="config-row"><span class="cl">Visibility</span><select data-i="'+i+'" data-f="visibility">'+
+        '<option value="public"'+(c.visibility==='public'?' selected':'')+'>Public</option>'+
+        '<option value="private"'+(c.visibility!=='public'?' selected':'')+'>Private</option>'+
+        '<option value="unlisted"'+(c.visibility==='unlisted'?' selected':'')+'>Unlisted</option>'+
+      '</select></div>'+
       '<div class="field"><label>Languages</label><input type="text" value="'+esc((c.languages||[]).join(', '))+'" data-i="'+i+'" data-f="languages"></div>'+
       '<div class="field"><label>Personality</label><textarea rows="3" data-i="'+i+'" data-f="personality">'+esc(c.personality||'')+'</textarea></div>'+
       '<div class="field"><label>Reply Style</label><textarea rows="2" data-i="'+i+'" data-f="replyStyle">'+esc(c.replyStyle||'')+'</textarea></div>'+
       '<div class="field"><label>Bio</label><textarea rows="4" data-i="'+i+'" data-f="bio">'+esc(c.bio||'')+'</textarea></div>'+
       '<div class="field"><label>Extra Rules</label><textarea rows="2" data-i="'+i+'" data-f="extraRules">'+esc(c.extraRules||'')+'</textarea></div>'+
+      '<div class="field"><label>Example Messages (one per line, format: user: ... / assistant: ...)</label><textarea rows="4" data-i="'+i+'" data-f="exampleMessages" placeholder="user: k cha?&#10;assistant: cha ni, k garnu 😊">'+esc(renderExamples(c.exampleMessages))+'</textarea></div>'+
       '<div class="config-row"><span class="cl">Active</span><input type="checkbox" '+(isActive?'checked':'')+' data-i="'+i+'" data-f="active" style="width:auto"></div>'+
       '<div class="config-row"><span class="cl">Default</span><input type="radio" name="defaultChar" '+(isDefault?'checked':'')+' data-i="'+i+'" data-f="default" style="width:auto"></div>'+
       '<div style="margin-top:10px;display:flex;gap:8px"><button class="btn danger sm" onclick="removeCharacter('+i+')">Delete</button></div>'+
@@ -314,8 +323,12 @@ async function loadCharacters(){
 function addCharacter(){
   if(!charactersData)charactersData={characters:[],chatRouting:{}};
   var id='char_'+Date.now();
-  charactersData.characters.push({id:id,name:'New Character',active:true,default:false,languages:['English'],personality:'',replyStyle:'',bio:'',extraRules:'',typingProfile:{}});
+  charactersData.characters.push({id:id,name:'New Character',tagline:'',greeting:'',tags:[],visibility:'private',active:true,default:false,languages:['English'],personality:'',replyStyle:'',bio:'',extraRules:'',exampleMessages:[],typingProfile:{}});
   saveAllCharacters();
+}
+
+function renderExamples(examples){
+  return (examples||[]).map(function(m){return (m.role||'user')+': '+m.content}).join('\n');
 }
 
 function removeCharacter(i){
@@ -333,11 +346,16 @@ async function saveAllCharacters(){
     if(!charactersData.characters[i])return;
     if(f==='id')charactersData.characters[i].id=el.value.trim();
     else if(f==='name')charactersData.characters[i].name=el.value.trim();
+    else if(f==='tagline')charactersData.characters[i].tagline=el.value.trim();
+    else if(f==='greeting')charactersData.characters[i].greeting=el.value.trim();
+    else if(f==='tags')charactersData.characters[i].tags=el.value.split(',').map(function(s){return s.trim()}).filter(Boolean);
+    else if(f==='visibility')charactersData.characters[i].visibility=el.value;
     else if(f==='languages')charactersData.characters[i].languages=el.value.split(',').map(function(s){return s.trim()}).filter(Boolean);
     else if(f==='personality')charactersData.characters[i].personality=el.value;
     else if(f==='replyStyle')charactersData.characters[i].replyStyle=el.value;
     else if(f==='bio')charactersData.characters[i].bio=el.value;
     else if(f==='extraRules')charactersData.characters[i].extraRules=el.value;
+    else if(f==='exampleMessages')charactersData.characters[i].exampleMessages=el.value.split('\n').map(function(l){var m=l.match(/^(user|assistant|character):\s?(.*)$/i);if(!m)return null;return {role:m[1].toLowerCase()==='user'?'user':'assistant',content:m[2]};}).filter(Boolean);
     else if(f==='active')charactersData.characters[i].active=el.checked;
     else if(f==='default'&&el.checked)charactersData.defaultCharacter=charactersData.characters[i].id;
   });

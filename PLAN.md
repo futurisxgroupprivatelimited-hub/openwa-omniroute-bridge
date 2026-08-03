@@ -158,13 +158,17 @@ All timings are per-character editable in `characters.json` → `typingProfile`.
 
 ## 8. Roadmap
 
+### v0.3 (current)
 - [x] Webhook receiver with HMAC + idempotency
 - [x] Per-chat memory from OpenWA DB
 - [x] Single-character persona (Barsha Siwakoti)
 - [x] Hyper-realistic typing simulation
-- [x] Management dashboard
-- [ ] Multi-character routing (this release)
-- [ ] Dashboard editors for characters + settings (this release)
+- [x] Multi-character routing (`chatRouting` + default)
+- [x] Dashboard editors for characters + settings
+- [x] One-command setup (`setup.sh`) — installs OpenWA + OmniRoute
+- [x] Professional character model (greeting, tags, visibility, examples, version)
+- [x] Full README docs
 - [ ] Send media (images, voice) — future
 - [ ] Keyword/command triggers per character — future
 - [ ] Rate limiting / cooldowns per chat — future
+- [ ] `antigravity/gpt-oss-120b-medium` via OmniRoute Google OAuth — blocked on user auth

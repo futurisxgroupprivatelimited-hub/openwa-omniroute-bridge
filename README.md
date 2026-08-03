@@ -1,60 +1,246 @@
-# OpenWA ⇄ OmniRoute bridge
+# OpenWA Bridge — Multi-Character WhatsApp AI Platform
 
-Connects a WhatsApp number (via OpenWA) to the OmniRoute LLM gateway so incoming
-WhatsApp messages are answered by an AI model.
+> Professional, self-contained WhatsApp bridge that turns any number into conversational AI characters.
+> Connects [OpenWA](https://github.com/rmyndharis/OpenWA) (WhatsApp gateway) to [OmniRoute](https://github.com/diegosouzapw/OmniRoute) (LLM gateway) with editable personas, hyper-realistic typing, and a full management dashboard.
 
-## Flow
+---
 
-```
-WhatsApp user
-   │  message
-   ▼
-OpenWA (http://localhost:2785)   — session "krn", receives the message
-   │  webhook POST message.received
-   ▼
-Bridge (this folder, port 3001)
-   │  POST /v1/chat/completions  (model auto)
-   ▼
-OmniRoute (http://localhost:20128)  — routes to a free/available LLM
-   │  reply text
-   ▼
-Bridge
-   │  POST /api/sessions/krn/messages/send-text
-   ▼
-OpenWA  ──▶  WhatsApp user
-```
-
-## Run
+## Quick Start (one command)
 
 ```bash
-./start.sh
+# Clone and run everything
+git clone https://github.com/futurisxgroupprivatelimited-hub/openwa-omniroute-bridge.git
+cd openwa-omniroute-bridge
+chmod +x setup.sh
+./setup.sh
 ```
 
-Config lives in `.env`:
-- `OPENWA_API_KEY` — OpenWA admin/operator key
-- `OMNIROUTE_BASE_URL` / `OMNIROUTE_MODEL` — LLM gateway (`auto` = smart routing)
-- `WEBHOOK_SECRET` — must match the secret registered on the OpenWA webhook
-- `SYSTEM_PROMPT` — persona of the WhatsApp assistant
+The setup script automatically:
+- ✅ Checks prerequisites (Docker, Node.js, git)
+- ✅ Clones OpenWA and starts it via Docker
+- ✅ Starts OmniRoute via Docker
+- ✅ Configures the bridge with secrets
+- ✅ Registers the webhook on OpenWA
+- ✅ Starts the bridge on port 3001
 
-## Register the webhook (already done)
+After setup, open the dashboard at **http://localhost:3001** and scan the QR at **http://localhost:2785**.
 
-```bash
-# sessionId here is the session UUID (from GET /api/sessions), NOT the name.
-# Current session: 50031d5c-7f1f-406a-b5fa-532e6e4d7d32 (name "krn")
-curl -X POST http://localhost:2785/api/sessions/50031d5c-7f1f-406a-b5fa-532e6e4d7d32/webhooks \
-  -H "Content-Type: application/json" \
-  -H "X-API-Key: $OPENWA_API_KEY" \
-  -d '{
-    "url": "http://localhost:3001/webhook",
-    "events": ["message.received"],
-    "secret": "'"$WEBHOOK_SECRET"'"
-  }'
+---
+
+## What It Does
+
+1. Someone sends a WhatsApp message to your linked number
+2. OpenWA receives it and fires a signed webhook to the bridge
+3. The bridge looks up which **character** handles that chat
+4. It loads the last N messages as **conversation memory** from OpenWA's database
+5. It calls OmniRoute (multi-provider LLM) with the character's system prompt + history
+6. It simulates **hyper-realistic typing** (type → delete → think → type → send)
+7. It sends the reply back through OpenWA to WhatsApp
+
+---
+
+## Features
+
+### Multi-Character System
+- Define unlimited characters with unique personalities, bios, and reply styles
+- Assign different characters to different chats
+- Toggle characters active/inactive
+- Set a default character for new conversations
+
+### Hyper-Realistic Typing
+- 7-step typing pattern based on real human behavior research
+- Type → delete everything → pause to think → maybe false start → type again → re-read → send
+- Configurable timing per character
+- Recipient sees realistic "typing..." bubbles
+
+### Per-Chat Memory
+- Fetches last 40 messages from OpenWA's SQLite database
+- Chronological conversation history sent to the LLM
+- Bot remembers what was discussed earlier in each chat
+
+### Management Dashboard
+- **Overview**: Live status of all services, message counts, recent messages, live logs
+- **Characters**: Add/edit/delete personas with full bio, personality, reply style, languages
+- **Settings**: Model, fallback model, memory depth, token limits, typing timings
+- **Messages**: View conversation history per chat
+- **Logs**: Color-coded bridge logs with auto-scroll
+- **Typing**: Visual flow diagram of the typing simulation
+- **Architecture**: System diagram
+
+### Model Flexibility
+- Use any OpenAI-compatible model via OmniRoute
+- Default: `big-pickle` (free tier, works immediately)
+- Supports: `antigravity/gpt-oss-120b-medium` (needs Google OAuth in OmniRoute dashboard)
+- Automatic fallback if primary model fails
+
+---
+
+## Project Structure
+
+```
+openwa-omniroute-bridge/
+├── bridge.mjs              # Main server (zero external deps)
+├── characters.json         # ★ EDITABLE — character profiles
+├── settings.json           # ★ EDITABLE — bridge settings
+├── .env                    # Secrets (gitignored)
+├── setup.sh                # One-command setup (installs OpenWA + OmniRoute)
+├── start.sh                # Bridge launcher
+├── PLAN.md                 # Architecture and roadmap
+├── README.md               # This file
+├── package.json            # Metadata
+├── .gitignore
+└── public/
+    └── index.html          # Management dashboard
 ```
 
-## Test
+---
 
-1. Open http://localhost:2785 → session `krn` → confirm the QR is linked.
-2. Send a WhatsApp message to the connected number.
-3. Bridge replies via OmniRoute:
-   - `curl http://localhost:3001/health`
-   - `docker logs openwa-api` / bridge stdout for `[msg]` / `[llm]` lines
+## Character Configuration
+
+Edit `characters.json` to define your characters. Each character has:
+
+```json
+{
+  "id": "barsha",
+  "name": "Barsha Siwakoti",
+  "active": true,
+  "default": true,
+  "languages": ["English", "Nepali"],
+  "personality": "warm, friendly, playful, never reveals being AI",
+  "replyStyle": "very short, 1-2 sentences, casual WhatsApp style",
+  "bio": "Full biography here...",
+  "extraRules": "Additional behavioral rules...",
+  "typingProfile": {
+    "readDelayMs": [2000, 5000],
+    "falseStartChance": 0.35,
+    "minTypingMs": 2000,
+    "maxTypingMs": 8000
+  }
+}
+```
+
+### Chat Routing
+
+Assign characters to specific chats in the `chatRouting` map:
+
+```json
+{
+  "chatRouting": {
+    "104089270661245@lid": "barsha",
+    "217763482206244@lid": "business-bot"
+  }
+}
+```
+
+Chats without an explicit assignment use the character marked `"default": true`.
+
+---
+
+## Settings
+
+Edit `settings.json` to configure the bridge:
+
+| Setting | Default | Description |
+|---|---|---|
+| `model` | `big-pickle` | Primary LLM model (OmniRoute model name) |
+| `fallbackModel` | `auto` | Fallback model if primary fails |
+| `memoryLimit` | `40` | Messages fetched per chat for context |
+| `maxTokens` | `80` | Max LLM response tokens |
+| `replyHardCap` | `120` | Hard character limit on replies |
+| `defaultCharacter` | `barsha` | Default character ID |
+
+---
+
+## API Reference
+
+The bridge exposes these endpoints on port 3001:
+
+| Method | Path | Description |
+|---|---|---|
+| `POST` | `/webhook` | OpenWA webhook receiver (HMAC verified) |
+| `GET` | `/health` | Liveness check + stats |
+| `GET` | `/config` | Resolved config + active system prompt |
+| `GET` | `/logs?lines=N` | Recent bridge logs |
+| `GET` | `/characters` | All character profiles |
+| `PUT` | `/characters` | Save all characters (persists to disk) |
+| `GET` | `/settings` | Current settings |
+| `PUT` | `/settings` | Save settings (persists to disk) |
+
+---
+
+## Architecture
+
+```
+┌──────────────┐     ┌─────────────────────────┐     ┌─────────────────────┐     ┌─────────────────┐
+│   WhatsApp   │────▶│      OpenWA Server      │────▶│   Bridge (Node.js)  │────▶│    OmniRoute    │
+│    User      │◀────│   port 2785 (Docker)    │◀────│     port 3001       │◀────│   port 20128    │
+└──────────────┘     └─────────────────────────┘     └─────────────────────┘     └─────────────────┘
+                            │ SQLite DB                    │ characters.json
+                            │ Messages table               │ settings.json
+                            │ Webhooks table               │ .env (secrets)
+```
+
+### Data Flow
+
+```
+WhatsApp → OpenWA (engine) → Webhook POST (HMAC signed) → Bridge
+  → Verify signature → Deduplicate → Fetch memory from OpenWA DB
+  → Look up character for this chat → Build system prompt
+  → Call OmniRoute /v1/chat/completions → Get reply
+  → Execute typing simulation (8-15s) → Send reply via OpenWA
+  → WhatsApp delivers to user
+```
+
+---
+
+## Typing Simulation
+
+The bridge simulates realistic human typing in 7 steps:
+
+1. **Read message** (2–5s) — human reads before reacting
+2. **Start typing** (1.5–3.5s) — types something
+3. **DELETE everything** (1.5–4s) — changes mind, thinks
+4. **False start** (35% chance) — types again then deletes again
+5. **Final typing** (2–8s) — actually writes the reply (scales with length)
+6. **Re-read before send** (0.4–1.2s) — re-reads, hits send
+7. **Message delivered** ✓
+
+All timings are configurable per character in `characters.json → typingProfile`.
+
+---
+
+## Troubleshooting
+
+### WhatsApp session keeps disconnecting
+WhatsApp's anti-automation detection may unlink the device. Solutions:
+- Use a **dedicated number** (not your personal phone)
+- Avoid bulk/rapid messages
+- The typing simulation helps (delays look more human)
+- Re-scan QR at http://localhost:2785
+
+### Webhook returns 409 "Session is not connected"
+The WhatsApp session is `qr_ready` (not linked). Scan the QR at http://localhost:2785.
+
+### OmniRoute returns 503 "Maximum combo retry limit reached"
+All free-tier providers are exhausted. Wait for quotas to reset, or add your own API keys in the OmniRoute dashboard at http://localhost:20128.
+
+### System prompt shows "Loading..." in dashboard
+Hard-refresh the page (Ctrl+Shift+R / Cmd+Shift+R).
+
+---
+
+## Tech Stack
+
+| Component | Technology | Port |
+|---|---|---|
+| WhatsApp Gateway | OpenWA (whatsapp-web.js) | 2785 |
+| LLM Gateway | OmniRoute (290+ providers) | 20128 |
+| Bridge | Node.js (zero deps) | 3001 |
+| Database | SQLite (OpenWA's) | — |
+| Container | Docker | — |
+
+---
+
+## License
+
+MIT
