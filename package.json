@@ -1,0 +1,13 @@
+{
+  "name": "openwa-omniroute-bridge",
+  "version": "1.0.0",
+  "description": "Professional multi-character WhatsApp bridge connecting OpenWA to OmniRoute LLM",
+  "type": "module",
+  "scripts": {
+    "start": "bash start.sh",
+    "dev": "bash start.sh"
+  },
+  "author": "",
+  "license": "MIT",
+  "keywords": ["whatsapp", "llm", "openwa", "omniroute", "bridge", "chatbot"]
+}

@@ -1,0 +1,15 @@
+{
+  "model": "big-pickle",
+  "fallbackModel": "auto",
+  "memoryLimit": 40,
+  "maxTokens": 80,
+  "replyHardCap": 120,
+  "defaultCharacter": "barsha",
+  "typing": {
+    "enabled": true,
+    "readDelayMs": [2000, 5000],
+    "falseStartChance": 0.35,
+    "minTypingMs": 2000,
+    "maxTypingMs": 8000
+  }
+}
