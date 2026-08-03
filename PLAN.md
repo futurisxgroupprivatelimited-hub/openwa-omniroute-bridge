@@ -103,16 +103,25 @@ User types "k cha?"
 
 ### Routing rules
 
-1. If a `sessionId` is in `sessionRouting`, use that character (per-WhatsApp-number).
-2. If a `chatId` is in `chatRouting`, use that character.
-3. Otherwise use the character flagged `"default": true`.
-4. Characters can be toggled `active` — inactive ones are never assigned.
+1. If the message arrived on a **character webhook** (`/webhook/<slug>`), use that character.
+2. If a `sessionId` is in `sessionRouting`, use that character (per-WhatsApp-number).
+3. If a `chatId` is in `chatRouting`, use that character.
+4. Otherwise use the character flagged `"default": true`.
+5. Characters can be toggled `active` — inactive ones are never assigned.
+
+### Per-character webhooks
+
+Every active character exposes `POST /webhook/<slug>` (slug derived from id or `webhookPath`).
+Messages delivered via a character's URL are handled exclusively by that character.
+`GET /webhooks` lists the URLs; `POST /webhooks/register` adds them to an OpenWA session
+using the bridge API key. Auto-registration on new sessions is on by default
+(`settings.json → webhooks.autoRegister`).
 
 ### Multi-session awareness
 
 The bridge discovers all OpenWA sessions (`GET /api/sessions`) on startup and polls every 30s.
 For each session it tracks: name, status (ready/qr_ready/etc.), phone, webhook registration,
-last seen activity, and the character it routes to. Newly discovered sessions get their webhook
+last seen activity, and the character it routes to. Newly discovered sessions get their webhooks
 auto-registered. Exposed via `GET /sessions` and surfaced in the dashboard **Sessions** tab.
 
 ---
@@ -153,7 +162,10 @@ All timings are per-character editable in `characters.json` → `typingProfile`.
 
 | Method | Path | Purpose |
 |---|---|---|
-| POST | `/webhook` | OpenWA webhook receiver (HMAC verified) |
+| POST | `/webhook` | Generic webhook receiver (routing priority below) |
+| POST | `/webhook/:slug` | Per-character webhook receiver (forces that character) |
+| GET  | `/webhooks` | List generic + per-character webhook URLs |
+| POST | `/webhooks/register` | Register webhook(s) onto an OpenWA session |
 | GET  | `/health` | Liveness + stats + session count |
 | GET  | `/logs?lines=N` | Recent bridge logs |
 | GET  | `/config` | Resolved config (settings + active prompt + sessions) |
@@ -175,6 +187,7 @@ All timings are per-character editable in `characters.json` → `typingProfile`.
 - [x] Hyper-realistic typing simulation
 - [x] Multi-character routing (`chatRouting` + default)
 - [x] Multi-session awareness (discover + auto-register webhooks + per-session routing)
+- [x] Per-character webhooks (`/webhook/:slug` forces character) + register API + dashboard tab
 - [x] Dashboard editors for characters + settings + session routing
 - [x] One-command setup (`setup.sh`) — installs OpenWA + OmniRoute
 - [x] Professional character model (greeting, tags, visibility, examples, version)

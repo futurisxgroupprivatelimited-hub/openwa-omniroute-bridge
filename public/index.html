@@ -86,6 +86,7 @@ label{font-size:12px;font-weight:600;display:block;margin-bottom:4px;color:var(-
 <div class="tabs" id="tabBar">
   <div class="tab active" data-page="overview">Overview</div>
   <div class="tab" data-page="sessions">Sessions</div>
+  <div class="tab" data-page="webhooks">Webhooks</div>
   <div class="tab" data-page="characters">Characters</div>
   <div class="tab" data-page="settings">Settings</div>
   <div class="tab" data-page="messages">Messages</div>
@@ -129,6 +130,41 @@ label{font-size:12px;font-weight:600;display:block;margin-bottom:4px;color:var(-
       </tr></thead>
       <tbody id="sessionRows"><tr><td colspan="6"><div class="empty">Loading sessions...</div></td></tr></tbody>
     </table>
+  </div>
+</div>
+
+<!-- WEBHOOKS -->
+<div class="page" id="page-webhooks">
+  <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px">
+    <h2 style="font-size:16px;font-weight:700">Character Webhooks</h2>
+    <div style="display:flex;gap:8px;align-items:center">
+      <select id="whSessionSelect" style="min-width:220px"><option value="">Choose session...</option></select>
+      <button class="btn primary" onclick="registerAllWebhooks()">Register all on session</button>
+      <button class="btn" onclick="loadWebhooks()">Refresh</button>
+    </div>
+  </div>
+  <div class="card section">
+    <h3>Generic webhook <span class="sub-inline">Uses session → chat → default character routing</span></h3>
+    <table>
+      <tbody id="whGenericRow"></tbody>
+    </table>
+  </div>
+  <div class="card section">
+    <h3>Per-character webhooks <span class="sub-inline">Messages arriving on a character's URL are handled by that character, regardless of session/chat</span></h3>
+    <table>
+      <thead><tr><th>Character</th><th>Webhook URL</th><th>Copy</th><th>Register on session</th></tr></thead>
+      <tbody id="whRows"><tr><td colspan="4"><div class="empty">Loading webhooks...</div></td></tr></tbody>
+    </table>
+  </div>
+  <div class="card section">
+    <h3>How it works</h3>
+    <p style="font-size:12px;line-height:1.8;color:var(--muted)">
+      1. Each active character has a unique webhook URL like <code style="color:var(--accent)">/webhook/barsha</code>.<br>
+      2. Add it in OpenWA: <em>Session → Webhooks → New Webhook</em>, paste the URL, and set the same secret as the bridge (<code style="color:var(--accent)">.env → WEBHOOK_SECRET</code>).<br>
+      3. Any message delivered through that URL is answered by that character — no chat routing needed.<br>
+      4. "Register on session" adds the URL to OpenWA automatically using the bridge's API key.<br>
+      5. The generic <code style="color:var(--accent)">/webhook</code> still routes via session → chat → default priority.
+    </p>
   </div>
 </div>
 
@@ -308,6 +344,7 @@ async function refreshAll(){
     rLogs('fullLogs',lr.lines||[]);rLogs('overviewLogs',(lr.lines||[]).slice(-18));
     $('lastRefresh','Updated '+new Date().toLocaleTimeString());
     loadSessions();
+    loadWebhooks();
   }catch(e){console.error(e)}
 }
 
@@ -347,6 +384,53 @@ function onSessionRouteChange(id,val){
 async function saveSessionRouting(){
   var r=await fetch(BRIDGE+'/sessions',{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({sessionRouting:sessionRouteSel})});
   if(r.ok){toast('Session routing saved!');loadSessions();}else{toast('Save failed!');}
+}
+
+// ── WEBHOOKS ──
+function copyWebhook(url){
+  (navigator.clipboard?navigator.clipboard.writeText(url):Promise.reject()).then(function(){toast('Copied!')}).catch(function(){
+    var t=document.createElement('textarea');t.value=url;document.body.appendChild(t);t.select();document.execCommand('copy');t.remove();toast('Copied!');
+  });
+}
+
+async function loadWebhooks(){
+  var res=await fetch(BRIDGE+'/webhooks').then(function(r){return r.json()}).catch(function(){return null});
+  if(!res)return;
+  var rows=res.webhooks||[];
+  document.getElementById('whGenericRow').innerHTML='<tr>'+
+    '<td><strong>All messages (routing)</strong></td>'+
+    '<td><code style="font-size:11px">'+esc(res.generic.url)+'</code></td>'+
+    '<td><button class="btn sm" onclick="copyWebhook(\''+esc(res.generic.url)+'\')">Copy</button></td>'+
+    '<td></td></tr>';
+  document.getElementById('whRows').innerHTML=rows.map(function(w){
+    return '<tr>'+
+      '<td><strong>'+esc(w.characterName)+'</strong><div style="font-size:10px;color:var(--muted)">'+esc(w.characterId)+'</div></td>'+
+      '<td><code style="font-size:11px">'+esc(w.url)+'</code></td>'+
+      '<td><button class="btn sm" onclick="copyWebhook(\''+esc(w.url)+'\')">Copy</button></td>'+
+      '<td><button class="btn sm primary" onclick="registerWebhook(\''+esc(w.characterId)+'\')">Register</button></td>'+
+    '</tr>';
+  }).join('');
+  // populate session select
+  var sels=document.getElementById('whSessionSelect');var cv=sels.value;
+  var sessRes=await fetch(BRIDGE+'/sessions').then(function(r){return r.json()}).catch(function(){return null});
+  if(sessRes){
+    sels.innerHTML='<option value="">Choose session...</option>'+
+      (sessRes.sessions||[]).map(function(s){return '<option value="'+esc(s.id)+'"'+(s.id===cv?' selected':'')+'>'+esc(s.name)+' · '+esc(s.status)+'</option>'}).join('');
+  }
+}
+
+async function registerWebhook(characterId){
+  var sessionId=document.getElementById('whSessionSelect').value;
+  if(!sessionId){toast('Choose a session first');return;}
+  var r=await fetch(BRIDGE+'/webhooks/register',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({sessionId:sessionId,characterIds:[characterId]})});
+  if(r.ok){toast('Registered '+characterId+' webhook on session');loadSessions();}else{toast('Register failed!');}
+}
+
+async function registerAllWebhooks(){
+  var sessionId=document.getElementById('whSessionSelect').value;
+  if(!sessionId){toast('Choose a session first');return;}
+  var r=await fetch(BRIDGE+'/webhooks/register',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({sessionId:sessionId})});
+  if(r.ok){toast('Registered all webhooks on session');loadSessions();}else{toast('Register failed!');}
 }
 
 // ── CHARACTERS ──

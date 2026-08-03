@@ -54,6 +54,12 @@ After setup, open the dashboard at **http://localhost:3001** and scan the QR at 
 - Webhooks are **auto-registered** when a new session is discovered — zero manual config
 - Per-chat routing still works within each session
 
+### Per-Character Webhooks
+- Every active character gets a **unique webhook URL** (`/webhook/barsha`, `/webhook/business-bot`, …)
+- Add a character's URL in OpenWA and all messages arriving through it are handled by **that character** — no chat or session routing needed
+- Dashboard **Webhooks** tab: copy any character URL, or register it onto a session with one click
+- Webhook base configurable via `OPENWA_WEBHOOK_BASE` (default `http://host.docker.internal:3001` for Docker OpenWA)
+
 ### Hyper-Realistic Typing
 - 7-step typing pattern based on real human behavior research
 - Type → delete everything → pause to think → maybe false start → type again → re-read → send
@@ -154,7 +160,21 @@ Sessions are discovered automatically from OpenWA — edit routing from the dash
 }
 ```
 
-Priority: **session routing** → **chat routing** → **default character**.
+Priority: **webhook character** → **session routing** → **chat routing** → **default character**.
+
+### Per-Character Webhooks
+
+Each active character exposes a webhook URL, derived from its id (or an optional `webhookPath` field):
+
+| Character | Webhook URL |
+|---|---|
+| Barsha Siwakoti | `http://host.docker.internal:3001/webhook/barsha` |
+| Business Bot | `http://host.docker.internal:3001/webhook/business-bot` |
+
+Register a character webhook in OpenWA (Session → Webhooks → New) using the **same secret** as `.env → WEBHOOK_SECRET`.
+Messages delivered via that URL are answered exclusively by that character. The bridge auto-registers
+the generic webhook + every character webhook on newly discovered sessions (disable via
+`settings.json → webhooks.autoRegister`).
 
 ---
 
@@ -179,7 +199,10 @@ The bridge exposes these endpoints on port 3001:
 
 | Method | Path | Description |
 |---|---|---|
-| `POST` | `/webhook` | OpenWA webhook receiver (HMAC verified) |
+| `POST` | `/webhook` | Generic webhook receiver (session → chat → default routing) |
+| `POST` | `/webhook/:slug` | Per-character webhook receiver (forces that character) |
+| `GET` | `/webhooks` | List generic + per-character webhook URLs |
+| `POST` | `/webhooks/register` | Register webhook(s) onto an OpenWA session |
 | `GET` | `/health` | Liveness check + stats + session count |
 | `GET` | `/logs?lines=N` | Recent bridge logs |
 | `GET` | `/config` | Resolved config + active prompt + sessions |
@@ -208,7 +231,9 @@ The bridge exposes these endpoints on port 3001:
 
 ```
 WhatsApp → OpenWA (engine) → Webhook POST (HMAC signed) → Bridge
-  → Verify signature → Deduplicate → Fetch memory from OpenWA DB
+  → Verify signature → Deduplicate → Resolve character:
+      webhook slug (e.g. /webhook/barsha) → sessionRouting → chatRouting → default
+  → Fetch memory from OpenWA DB
   → Look up character for this chat → Build system prompt
   → Call OmniRoute /v1/chat/completions → Get reply
   → Execute typing simulation (8-15s) → Send reply via OpenWA

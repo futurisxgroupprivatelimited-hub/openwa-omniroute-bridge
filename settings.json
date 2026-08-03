@@ -5,6 +5,9 @@
   "maxTokens": 80,
   "replyHardCap": 120,
   "defaultCharacter": "barsha",
+  "webhooks": {
+    "autoRegister": true
+  },
   "typing": {
     "enabled": true,
     "readDelayMs": [2000, 5000],

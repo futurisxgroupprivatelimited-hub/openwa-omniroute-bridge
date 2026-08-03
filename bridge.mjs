@@ -10,6 +10,7 @@ const OPENWA_BASE = (process.env.OPENWA_BASE_URL || 'http://localhost:2785').rep
 const OPENWA_API_KEY = process.env.OPENWA_API_KEY || '';
 const OMNIRoute_BASE = (process.env.OMNIROUTE_BASE_URL || 'http://localhost:20128').replace(/\/$/, '');
 const WEBHOOK_SECRET = process.env.WEBHOOK_SECRET || '';
+const WEBHOOK_BASE = (process.env.OPENWA_WEBHOOK_BASE || `http://host.docker.internal:${PORT}`).replace(/\/$/, '');
 const CHARACTERS_FILE = path.join(__dirname, 'characters.json');
 const SETTINGS_FILE = path.join(__dirname, 'settings.json');
 
@@ -165,6 +166,54 @@ function httpJson(method, url, payload, headers = {}) {
 
 const postJson = (url, payload, headers = {}) => httpJson('POST', url, payload, headers);
 
+function webhookSlug(character) {
+  const base = String(character?.webhookPath || character?.id || '')
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/^-+|-+$/g, '');
+  return base || 'default';
+}
+
+function characterWebhooks() {
+  return (chars.characters || [])
+    .filter(c => c.active !== false)
+    .map(c => {
+      const slug = webhookSlug(c);
+      return { characterId: c.id, characterName: c.name, slug, path: `/webhook/${slug}`, url: `${WEBHOOK_BASE}/webhook/${slug}` };
+    });
+}
+
+function genericWebhook() {
+  return { path: '/webhook', url: `${WEBHOOK_BASE}/webhook` };
+}
+
+async function registerWebhooksForSession(sessionId, characterIds) {
+  const s = encodeURIComponent(sessionId);
+  const { body } = await httpJson('GET', `${OPENWA_BASE}/api/sessions/${s}/webhooks`, null, { 'X-API-Key': OPENWA_API_KEY });
+  const parsed = JSON.parse(body);
+  const list = Array.isArray(parsed) ? parsed : parsed.webhooks || [];
+  for (const w of list) {
+    if (String(w.url || '').includes(`:${PORT}`)) {
+      await httpJson('DELETE', `${OPENWA_BASE}/api/sessions/${s}/webhooks/${encodeURIComponent(w.id)}`, null, { 'X-API-Key': OPENWA_API_KEY }).catch(() => {});
+    }
+  }
+  const urls = [];
+  const push = async url => {
+    await postJson(`${OPENWA_BASE}/api/sessions/${s}/webhooks`, { url, events: ['message.received'], secret: WEBHOOK_SECRET }, { 'X-API-Key': OPENWA_API_KEY });
+    urls.push(url);
+  };
+  if (characterIds && characterIds.length) {
+    for (const id of characterIds) {
+      const c = characterWebhooks().find(w => w.characterId === id);
+      if (c) await push(c.url);
+    }
+  } else {
+    await push(genericWebhook().url);
+    for (const c of characterWebhooks()) await push(c.url);
+  }
+  return urls;
+}
+
 async function sessionHasBridgeWebhook(sessionId) {
   try {
     const { body } = await httpJson('GET', `${OPENWA_BASE}/api/sessions/${encodeURIComponent(sessionId)}/webhooks`, null, { 'X-API-Key': OPENWA_API_KEY });
@@ -208,18 +257,16 @@ async function refreshSessions() {
         sessionHasBridgeWebhook(id).then(async hooked => {
           if (!sessions[id]) return;
           sessions[id].webhook = hooked;
-          if (hooked === false) {
+          if (hooked === false && data.webhooks?.autoRegister !== false) {
             try {
-              await postJson(
-                `${OPENWA_BASE}/api/sessions/${encodeURIComponent(id)}/webhooks`,
-                { url: `http://host.docker.internal:${PORT}/webhook`, events: ['message.received'], secret: WEBHOOK_SECRET },
-                { 'X-API-Key': OPENWA_API_KEY }
-              );
+              const urls = await registerWebhooksForSession(id);
               sessions[id].webhook = true;
-              log(`[sessions] ${id} webhook auto-registered ✓`);
+              log(`[sessions] ${id} auto-registered ${urls.length} webhook(s) ✓`);
             } catch (e) {
               log(`[sessions] ${id} webhook auto-register failed: ${e.message}`);
             }
+          } else if (hooked === false) {
+            log(`[sessions] ${id} has no bridge webhook (auto-register disabled)`);
           } else {
             log(`[sessions] ${id} webhook ${hooked === true ? 'registered ✓' : 'unknown'}`);
           }
@@ -237,11 +284,13 @@ async function refreshSessions() {
   }
 }
 
-function sessionSeen(sessionId) {
+function sessionSeen(sessionId, forcedCharacterId) {
   if (!sessionId) return;
   const s = sessions[sessionId] || (sessions[sessionId] = { id: sessionId, name: sessionId, status: 'active', phone: '', webhook: true, characterId: null, characterName: null });
   s.lastSeen = Date.now();
-  const character = characterForChat(null, sessionId);
+  const character = forcedCharacterId
+    ? (getActiveCharacters().find(c => c.id === forcedCharacterId) || characterForChat(null, sessionId))
+    : characterForChat(null, sessionId);
   s.characterId = character?.id || null;
   s.characterName = character?.name || null;
 }
@@ -359,7 +408,7 @@ async function sendWhatsApp(sessionId, chatId, text) {
   await postJson(`${OPENWA_BASE}/api/sessions/${encodeURIComponent(sessionId)}/messages/send-text`, { chatId, text }, { 'X-API-Key': OPENWA_API_KEY });
 }
 
-function handleMessage(event) {
+function handleMessage(event, forcedCharacterId) {
   const { data } = event;
   if (event.event !== 'message.received' || !data) return;
   if (data.fromMe) return;
@@ -369,11 +418,13 @@ function handleMessage(event) {
   const chatId = data.chatId || data.from;
   if (!chatId) return;
   const sessionId = event.sessionId;
-  sessionSeen(sessionId);
-  const character = characterForChat(chatId, sessionId);
+  sessionSeen(sessionId, forcedCharacterId);
+  const character = forcedCharacterId
+    ? (getActiveCharacters().find(c => c.id === forcedCharacterId) || characterForChat(chatId, sessionId))
+    : characterForChat(chatId, sessionId);
 
   stats.messagesIn++;
-  log(`[msg] ${sessionId} <- ${chatId}: ${text.slice(0, 80)} (char: ${character ? character.name : 'NONE'})`);
+  log(`[msg] ${sessionId} <- ${chatId}: ${text.slice(0, 80)} (webhook:${forcedCharacterId || 'generic'} → char: ${character ? character.name : 'NONE'})`);
 
   (async () => {
     const history = await fetchChatHistory(sessionId, chatId, text);
@@ -524,18 +575,50 @@ const server = http.createServer(async (req, res) => {
     return;
   }
 
-  // Webhook
-  if (req.method === 'POST' && p === '/webhook') {
+  // Webhook — per-character (POST /webhook/:slug)
+  const whMatch = p.match(/^\/webhook\/([^/]+)$/);
+  if (req.method === 'POST' && (p === '/webhook' || whMatch)) {
+    const seg = whMatch ? decodeURIComponent(whMatch[1]) : null;
+    const target = seg ? (chars.characters || []).find(c => webhookSlug(c) === seg) : null;
+    const forcedCharacterId = target ? target.id : null;
     try {
       const raw = await readBody(req);
       if (!verifySignature(raw, req.headers['x-openwa-signature'])) { json(res, 401, { error: 'invalid signature' }); return; }
       const event = JSON.parse(raw.toString('utf8'));
       const idem = req.headers['x-openwa-idempotency-key'];
       if (isDuplicate(idem)) { json(res, 200, { status: 'duplicate' }); return; }
-      handleMessage(event);
-      json(res, 200, { status: 'received' });
+      handleMessage(event, forcedCharacterId);
+      json(res, 200, { status: 'received', character: forcedCharacterId || 'generic' });
     } catch (e) {
       log(`[webhook] error: ${e.message}`);
+      json(res, 400, { error: e.message });
+    }
+    return;
+  }
+
+  // List per-character webhook URLs
+  if (req.method === 'GET' && p === '/webhooks') {
+    json(res, 200, {
+      base: WEBHOOK_BASE,
+      secret: WEBHOOK_SECRET ? `${WEBHOOK_SECRET.slice(0, 8)}…` : '(none)',
+      generic: genericWebhook(),
+      webhooks: characterWebhooks(),
+    });
+    return;
+  }
+
+  // Register character webhooks onto an OpenWA session
+  if (req.method === 'POST' && p === '/webhooks/register') {
+    try {
+      const raw = await readBody(req);
+      const body = JSON.parse(raw.toString('utf8'));
+      if (!body.sessionId) { json(res, 400, { error: 'sessionId required' }); return; }
+      const urls = await registerWebhooksForSession(body.sessionId, body.characterIds);
+      if (sessions[body.sessionId]) sessions[body.sessionId].webhook = true;
+      log(`[webhooks] registered ${urls.length} webhook(s) on ${body.sessionId}`);
+      json(res, 200, { ok: true, urls });
+    } catch (e) {
+      log(`[webhooks] register failed: ${e.message}`);
       json(res, 400, { error: e.message });
     }
     return;
