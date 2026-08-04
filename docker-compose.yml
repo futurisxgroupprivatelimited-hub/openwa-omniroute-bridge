@@ -29,6 +29,7 @@ services:
       DATABASE_URL: postgres://${POSTGRES_USER:-openbridge}:${POSTGRES_PASSWORD:-openbridge}@db:5432/${POSTGRES_DB:-openbridge}
       JWT_SECRET: ${JWT_SECRET:-change-me-in-production}
       JWT_EXPIRES: ${JWT_EXPIRES:-12h}
+      WEBHOOK_BASE: ${WEBHOOK_BASE}
       OMNIROUTE_BASE_URL: ${OMNIROUTE_BASE_URL:-http://omniroute:20128}
       ADMIN_EMAIL: ${ADMIN_EMAIL:-admin@openbridge.local}
       ADMIN_PASSWORD: ${ADMIN_PASSWORD:-admin12345}
