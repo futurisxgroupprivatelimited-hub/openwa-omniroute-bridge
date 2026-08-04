@@ -230,6 +230,9 @@ export async function persistMessage(userId, sessionDbId, chatId, direction, bod
     'INSERT INTO messages (user_id, session_id, chat_id, direction, body, character_id, remote_id) VALUES ($1,$2,$3,$4,$5,$6,$7)',
     [userId, sessionDbId || null, chatId, direction, body, characterId || null, remoteId || null]
   );
+  if (characterId) {
+    await query('UPDATE characters SET last_active_at=now() WHERE id=$1', [characterId]);
+  }
 }
 
 // ── Session discovery / webhook registration ─────────────────────

@@ -9,6 +9,8 @@ let agSources = [];
 // ── helpers ─────────────────────────────────────────────
 function $(id){return document.getElementById(id)}
 function esc(s){return String(s==null?'':s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;')}
+function escAttr(s){return esc(s).replace(/'/g,'&#39;')}
+function fmtNum(n){n=Number(n)||0;if(n>=1e9)return (n/1e9).toFixed(1)+'B';if(n>=1e6)return (n/1e6).toFixed(1)+'M';if(n>=1e3)return (n/1e3).toFixed(1)+'k';return String(n)}
 function toast(msg,err){const t=$('toast');t.textContent=msg;t.className='toast show'+(err?' err':'');setTimeout(()=>t.className='toast',2500)}
 function copyText(t){navigator.clipboard?.writeText(t).then(()=>toast('Copied!')).catch(()=>{const x=document.createElement('textarea');x.value=t;document.body.appendChild(x);x.select();document.execCommand('copy');x.remove();toast('Copied!')})}
 function fmt(t){if(!t)return '—';const d=new Date(t);return isNaN(d)?'—':d.toLocaleString()}
@@ -188,31 +190,53 @@ function renderLogs(id,lines){
 }
 
 // ── characters ──────────────────────────────────────────
+function charColor(id){let h=0;for(const ch of String(id))h=(h*31+ch.charCodeAt(0))>>>0;return PG_PALETTE[h%PG_PALETTE.length]}
+function charAvatar(c){
+  const initial = esc(c.name?.charAt(0)?.toUpperCase() || '?');
+  const col = charColor(c.name||'');
+  if(c.avatar) return '<div class="ch-avatar"><img src="'+escAttr(c.avatar)+'" alt="" onerror="this.parentNode.innerHTML=\'<span>'+initial+'</span>\'"><span class="ch-dot '+esc(c.status||'sleeping')+'"></span></div>';
+  return '<div class="ch-avatar init" style="background:'+col+'"><span>'+initial+'</span><span class="ch-dot '+esc(c.status||'sleeping')+'"></span></div>';
+}
+function charStatusBadge(c){
+  const st=c.status||'sleeping';
+  const map={live:['green','LIVE · awake'],sleeping:['yellow','sleeping'],off:['red','inactive']};
+  const [cls,label]=map[st]||map.sleeping;
+  return '<span class="badge '+cls+'">'+label+'</span>';
+}
 async function loadCharacters(){
   const d=await api('/characters');
   characters=d.characters;
   const el=$('charList');
   if(!characters.length){el.innerHTML='<div class="empty">No characters yet. Create your first persona.</div>';return}
   el.innerHTML=characters.map(c=>{
-    const active=c.active?'<span class="badge green">active</span>':'<span class="badge red">inactive</span>';
     const webhook = me?`${location.origin}/webhook/${me.webhook_token}/${c.slug}`:'';
     return '<div class="char-form" data-id="'+c.id+'">'+
-      '<div class="head"><strong>'+esc(c.name)+'</strong> '+active+
-      ' <span class="spacer"></span>'+
+      '<div class="head">'+charAvatar(c)+
+      '<div style="flex:1"><strong>'+esc(c.name)+'</strong> '+charStatusBadge(c)+
+      '<div style="font-size:11px;color:var(--muted);font-weight:400">'+esc(c.tagline||c.slug||'')+'</div></div>'+
+      '<span class="spacer"></span>'+
+      '<label class="switch" title="Active — when off, this character ignores webhook traffic"><input type="checkbox"'+(c.active?' checked':'')+' onchange="toggleCharacterActive(\''+c.id+'\',this.checked)"><span class="slider"></span></label> '+
       '<button class="btn sm" onclick="fillCharacter(\''+c.id+'\')">Edit</button> '+
       '<button class="btn sm success" onclick="openPlayground(\''+c.id+'\')">Test</button> '+
       '<button class="btn sm danger" onclick="delCharacter(\''+c.id+'\')">Delete</button></div>'+
       '<div style="font-size:11px;color:var(--muted)">slug: '+esc(c.slug)+' · webhook: <code>'+esc(webhook)+'</code></div>'+
-      '<div style="font-size:12px;color:var(--muted);margin-top:6px">'+esc(c.tagline||c.personality?.slice(0,90)||'')+'</div>'+
+      '<div style="font-size:12px;color:var(--muted);margin-top:6px">'+esc(c.personality?.slice(0,90)||'')+'</div>'+
     '</div>';
   }).join('');
+}
+async function toggleCharacterActive(id,active){
+  try{
+    await api('/characters/'+id+'/active',{method:'PATCH',body:JSON.stringify({active})});
+    toast(active?'Character activated':'Character deactivated');
+    loadCharacters();
+  }catch(e){toast(e.message,true);loadCharacters()}
 }
 
 function newCharacter(){
   currentCharId=null;
   showCharEditor({
     name:'',slug:'',tagline:'',greeting:'',bio:'',personality:'',reply_style:'',extra_rules:'',
-    languages:['English'],tags:[],visibility:'private',active:true,
+    languages:['English'],tags:[],visibility:'private',active:true,avatar:'',
     example_messages:[],typing_profile:{},
     knowledge_base:'',social_links:[],drive_link:'',source_links:[],sources_verified:false
   });
@@ -249,6 +273,7 @@ function showCharEditor(c){
       '<div><label>Name</label><input id="cName" value="'+esc(c.name)+'"></div>'+
       '<div><label>Slug (webhook url)</label><input id="cSlug" value="'+esc(c.slug)+'" placeholder="auto from name"></div>'+
     '</div>'+
+    '<label>Avatar URL <span class="hint">profile picture shown on the dashboard</span></label><input id="cAvatar" value="'+esc(c.avatar||'')+'" placeholder="https://… or leave empty for a colored initial">'+
     '<label>Tagline</label><input id="cTagline" value="'+esc(c.tagline)+'">'+
     '<label>Greeting</label><input id="cGreeting" value="'+esc(c.greeting)+'" placeholder="First message for a new chat">'+
     '<label>Bio</label><textarea id="cBio" rows="3">'+esc(c.bio)+'</textarea>'+
@@ -288,6 +313,7 @@ async function saveCharacter(){
     extra_rules:$('cExtraRules').value,
     knowledge_base:$('cKnowledge').value,
     drive_link:$('cDrive').value.trim(),
+    avatar:$('cAvatar').value.trim(),
     social_links:socialLinksDraft.filter(s=>s.url&&s.url.trim()),
     languages:$('cLanguages').value.split(',').map(s=>s.trim()).filter(Boolean),
     tags:$('cTags').value.split(',').map(s=>s.trim()).filter(Boolean),
@@ -785,25 +811,56 @@ async function renderUserDetail(id){
 async function loadLlm(){
   try{
     const d=await api('/admin/llm');
-    $('llmBase').textContent=d.llm_base_url;
-    $('llmBearer').textContent=d.llm_bearer_masked+(d.llm_bearer_set?'':' (none)');
-    $('llmModel').textContent=d.llm_default_model;
-    $('adLlmBase').value=d.llm_base_url;
-    $('adLlmModel').value=d.llm_default_model;
-    $('adLlmBearer').value='';
-    const sb=$('llmStatusBadge');
-    sb.className='badge '+(d.llm_base_url?'green':'yellow');
-    sb.textContent=d.llm_base_url?'Configured':'Not configured';
+    $('llmTotalCalls').textContent=d.totals.calls;
+    $('llmTotalTokens').textContent=fmtNum(d.totals.total_tokens);
+    const active=d.endpoints.find(e=>e.id===d.active_id);
+    $('llmActiveName').textContent=active?esc(active.name):'none';
+    $('llmEndpointList').innerHTML=d.endpoints.map(e=>{
+      const on=e.id===d.active_id;
+      const u=e.usage;
+      const usage=u?'<span class="llm-usage">'+fmtNum(u.total_tokens)+' tokens · '+u.calls+' calls</span>':'<span class="llm-usage muted">no usage yet</span>';
+      return '<div class="llm-endpoint '+(on?'on':'')+'">'+
+        '<div class="llm-ep-head">'+
+          '<span class="llm-ep-name">'+esc(e.name)+(on?'<span class="badge green">ACTIVE</span>':'')+'</span>'+
+          '<label class="switch" title="Set active gateway"><input type="checkbox"'+(on?' checked':'')+' onchange="toggleLlm(\''+e.id+'\')"><span class="slider"></span></label>'+
+        '</div>'+
+        '<div class="llm-ep-meta"><code>'+esc(e.model)+'</code>'+usage+'</div>'+
+        '<div class="llm-ep-base"><code>'+esc(e.base_url)+'</code></div>'+
+        '<div class="llm-ep-actions">'+
+          '<button class="btn sm" onclick="testLlmById(\''+e.id+'\')">Test</button>'+
+          '<button class="btn sm danger" onclick="delLlm(\''+e.id+'\',\''+escAttr(e.name)+'\')">Delete</button>'+
+        '</div>'+
+      '</div>';
+    }).join('')||'<div class="muted" style="padding:10px 0">No endpoints — add one on the right.</div>';
     $('llmTestResult').innerHTML='';
   }catch(e){toast(e.message,true)}
 }
+function llmForm(){
+  return {name:$('adLlmName').value.trim(),base_url:$('adLlmBase').value.trim(),bearer_token:$('adLlmBearer').value.trim()||null,model:$('adLlmModel').value.trim(),is_active:$('adLlmActive').checked};
+}
 async function saveLlm(){
+  const body=llmForm();
+  if(!body.name||!body.base_url||!body.model){toast('Name, base URL and model are required',true);return}
   try{
-    const body={llm_base_url:$('adLlmBase').value.trim()};
-    if($('adLlmBearer').value)body.llm_bearer=$('adLlmBearer').value;
-    if($('adLlmModel').value.trim())body.llm_default_model=$('adLlmModel').value.trim();
-    await api('/admin/llm',{method:'PUT',body:JSON.stringify(body)});
-    toast('LLM gateway saved');loadLlm();
+    await api('/admin/llm',{method:'POST',body:JSON.stringify(body)});
+    toast('Endpoint saved');
+    $('adLlmName').value='';$('adLlmBearer').value='';$('adLlmModel').value='';$('adLlmActive').checked=false;
+    loadLlm();
+  }catch(e){toast(e.message,true)}
+}
+async function toggleLlm(id){
+  try{
+    await api('/admin/llm/'+id+'/active',{method:'PATCH',body:JSON.stringify({is_active:true})});
+    toast('Active gateway switched');
+    loadLlm();
+  }catch(e){toast(e.message,true);loadLlm()}
+}
+async function delLlm(id,name){
+  if(!confirm('Delete endpoint “'+name+'”?'))return;
+  try{
+    await api('/admin/llm/'+id,{method:'DELETE'});
+    toast('Endpoint deleted');
+    loadLlm();
   }catch(e){toast(e.message,true)}
 }
 function llmResultHtml(d){
@@ -825,8 +882,22 @@ async function testLlm(body){
     el.innerHTML=llmResultHtml({ok:false,error:e.message});
   }
 }
-function testCurrentLlm(){testLlm({})}
-function testNewLlm(){testLlm({llm_base_url:$('adLlmBase').value.trim(),llm_bearer:$('adLlmBearer').value.trim(),model:$('adLlmModel').value.trim()||'big-pickle'})}
+async function testLlmById(id){
+  const el=$('llmTestResult');
+  el.className='test-result';
+  el.innerHTML='<div class="llm-res"><div class="spin"></div><div><strong>Testing connection…</strong>'+
+    '<div class="llm-res-sub">contacting the endpoint</div></div></div>';
+  try{
+    const d=await api('/admin/llm/'+id+'/test',{method:'POST'});
+    el.innerHTML=llmResultHtml(d);
+  }catch(e){
+    el.innerHTML=llmResultHtml({ok:false,error:e.message});
+  }
+}
+function testNewLlm(){
+  const f=llmForm();
+  testLlm({llm_base_url:f.base_url,llm_bearer:f.bearer_token||'',model:f.model||'big-pickle'});
+}
 
 // ── settings ────────────────────────────────────────────
 async function loadSettingsForm(){

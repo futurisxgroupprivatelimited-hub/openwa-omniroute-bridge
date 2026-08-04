@@ -133,6 +133,7 @@ router.post('/', async (req, res) => {
        ($1,$2,'user',$3), ($1,$2,'assistant',$4)`,
       [req.user.id, characterId, text, replyText || '']
     );
+    await query('UPDATE characters SET last_active_at=now() WHERE id=$1', [characterId]);
 
     res.json({
       reply: replyText,

@@ -1,9 +1,9 @@
 import { Router } from 'express';
 import { query } from '../db.js';
 import { requireUser, requireAdmin, publicUser } from '../auth.js';
-import { getGateway, setGateway, maskSecret } from '../services/gateway.js';
-import { testLlmConfig } from '../services/omniroute.js';
+import { clearGatewayCache, maskSecret } from '../services/gateway.js';
 import { buildMessageWhere, pageMeta, countQuery } from '../services/stats.js';
+import { testLlmConfig } from '../services/omniroute.js';
 
 const router = Router();
 router.use(requireUser, requireAdmin);
@@ -169,35 +169,87 @@ router.get('/users/:id', async (req, res) => {
   });
 });
 
-// ── LLM gateway config ───────────────────────────────────────────
+// ── LLM Gateway Registry (Multi-model) ──────────────────────────────
 router.get('/llm', async (req, res) => {
-  const gw = await getGateway();
-  res.json({
-    llm_base_url: gw.llm_base_url,
-    llm_bearer_masked: maskSecret(gw.llm_bearer),
-    llm_bearer_set: Boolean(gw.llm_bearer),
-    llm_default_model: gw.llm_default_model,
-  });
+  try {
+    const r = await query('SELECT * FROM llm_endpoints ORDER BY created_at DESC');
+    const active = r.rows.find(x => x.is_active);
+    const usage = await query(
+      `SELECT endpoint_id, count(*)::int AS calls,
+              coalesce(sum(total_tokens),0)::int AS total_tokens,
+              coalesce(sum(context_tokens),0)::int AS context_tokens,
+              coalesce(sum(generated_tokens),0)::int AS generated_tokens
+       FROM llm_usage GROUP BY endpoint_id`
+    );
+    const usageBy = Object.fromEntries(usage.rows.map(u => [u.endpoint_id, u]));
+    res.json({
+      endpoints: r.rows.map(x => ({ ...x, bearer_token: maskSecret(x.bearer_token), usage: usageBy[x.id] || null })),
+      active_id: active?.id || null,
+      totals: {
+        calls: usage.rows.reduce((a, u) => a + u.calls, 0),
+        total_tokens: usage.rows.reduce((a, u) => a + u.total_tokens, 0),
+      },
+    });
+  } catch (e) { res.status(400).json({ error: e.message }); }
 });
 
-router.put('/llm', async (req, res) => {
+router.post('/llm', async (req, res) => {
   try {
-    const { llm_base_url, llm_bearer, llm_default_model } = req.body || {};
-    const gw = await setGateway({ llm_base_url, llm_bearer, llm_default_model });
-    res.json({
-      llm_base_url: gw.llm_base_url,
-      llm_bearer_masked: maskSecret(gw.llm_bearer),
-      llm_default_model: gw.llm_default_model,
-    });
-  } catch (e) {
-    res.status(400).json({ error: e.message });
-  }
+    const { name, base_url, bearer_token, model, is_active } = req.body || {};
+    if (!name || !base_url || !model) return res.status(400).json({ error: 'name, base_url, and model are required' });
+    if (is_active === true) {
+      await query('UPDATE llm_endpoints SET is_active=false WHERE is_active=true');
+    }
+    const r = await query(
+      `INSERT INTO llm_endpoints (name, base_url, bearer_token, model, is_active) VALUES ($1,$2,$3,$4,$5) RETURNING *`,
+      [name, base_url, bearer_token, model, is_active === true]
+    );
+    if (is_active === true) clearGatewayCache();
+    res.json({ ...r.rows[0], bearer_token: maskSecret(r.rows[0].bearer_token) });
+  } catch (e) { res.status(400).json({ error: e.message }); }
+});
+
+router.delete('/llm/:id', async (req, res) => {
+  try {
+    const del = await query('DELETE FROM llm_endpoints WHERE id=$1 RETURNING is_active', [req.params.id]);
+    if (!del.rows.length) return res.status(404).json({ error: 'not found' });
+    if (del.rows[0].is_active) clearGatewayCache();
+    res.json({ ok: true });
+  } catch (e) { res.status(400).json({ error: e.message }); }
+});
+
+router.patch('/llm/:id/active', async (req, res) => {
+  try {
+    const exist = await query('SELECT id FROM llm_endpoints WHERE id=$1', [req.params.id]);
+    if (!exist.rows.length) return res.status(404).json({ error: 'not found' });
+    const wantActive = req.body?.is_active !== false;
+    if (wantActive) {
+      await query('UPDATE llm_endpoints SET is_active=false WHERE is_active=true');
+    }
+    await query('UPDATE llm_endpoints SET is_active=$1 WHERE id=$2', [wantActive, req.params.id]);
+    clearGatewayCache();
+    res.json({ ok: true, is_active: wantActive });
+  } catch (e) { res.status(400).json({ error: e.message }); }
 });
 
 router.post('/llm/test', async (req, res) => {
   try {
     const { llm_base_url, llm_bearer, model } = req.body || {};
     res.json(await testLlmConfig({ llm_base_url, llm_bearer, model }));
+  } catch (e) {
+    res.status(400).json({ ok: false, error: e.message });
+  }
+});
+
+router.post('/llm/:id/test', async (req, res) => {
+  try {
+    const r = await query('SELECT base_url, bearer_token, model FROM llm_endpoints WHERE id=$1', [req.params.id]);
+    if (!r.rows.length) return res.status(404).json({ ok: false, error: 'not found' });
+    res.json(await testLlmConfig({
+      llm_base_url: r.rows[0].base_url,
+      llm_bearer: r.rows[0].bearer_token || '',
+      model: r.rows[0].model,
+    }));
   } catch (e) {
     res.status(400).json({ ok: false, error: e.message });
   }

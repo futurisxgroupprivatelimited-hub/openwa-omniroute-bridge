@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { slugify, asArray, normalizeCharacter, jsonb } from '../src/routes/characters.js';
+import { slugify, asArray, normalizeCharacter, jsonb, characterStatus } from '../src/routes/characters.js';
 
 // ── slugify ───────────────────────────────────────────────────────
 test('slugify: lowercases and replaces non-alphanumeric runs with a dash', () => {
@@ -74,4 +74,23 @@ test('normalizeCharacter: keeps well-formed arrays untouched (same reference)', 
   const arr = [{ role: 'user', content: 'x' }];
   const c = normalizeCharacter({ name: 'R', example_messages: arr });
   assert.equal(c.example_messages, arr);
+});
+
+// ── characterStatus ───────────────────────────────────────────────
+test('characterStatus: inactive characters report off regardless of activity', () => {
+  assert.equal(characterStatus({ active: false, last_active_at: new Date().toISOString() }), 'off');
+});
+
+test('characterStatus: active + recent activity = live', () => {
+  assert.equal(characterStatus({ active: true, last_active_at: new Date(Date.now() - 60_000).toISOString() }), 'live');
+});
+
+test('characterStatus: active + stale or no activity = sleeping', () => {
+  assert.equal(characterStatus({ active: true, last_active_at: new Date(Date.now() - 3600_000).toISOString() }), 'sleeping');
+  assert.equal(characterStatus({ active: true }), 'sleeping');
+});
+
+test('characterStatus: live window boundary is 10 minutes', () => {
+  assert.equal(characterStatus({ active: true, last_active_at: new Date(Date.now() - 9 * 60_000).toISOString() }), 'live');
+  assert.equal(characterStatus({ active: true, last_active_at: new Date(Date.now() - 11 * 60_000).toISOString() }), 'sleeping');
 });

@@ -6,7 +6,7 @@ const router = Router();
 router.use(requireUser);
 
 const FIELDS = ['name', 'slug', 'tagline', 'greeting', 'bio', 'personality', 'reply_style', 'extra_rules',
-  'languages', 'tags', 'visibility', 'active', 'example_messages', 'typing_profile',
+  'languages', 'tags', 'visibility', 'active', 'example_messages', 'typing_profile', 'avatar',
   'knowledge_base', 'social_links', 'drive_link', 'source_links', 'sources_verified'];
 
 const JSONB_FIELDS = new Set(['example_messages', 'typing_profile', 'social_links', 'source_links']);
@@ -31,7 +31,17 @@ export function normalizeCharacter(c) {
   c.source_links = asArray(c.source_links);
   c.languages = asArray(c.languages);
   c.tags = asArray(c.tags);
+  c.avatar = c.avatar || '';
+  c.status = characterStatus(c);
   return c;
+}
+
+const LIVE_WINDOW_MS = 10 * 60 * 1000;
+
+export function characterStatus(c) {
+  if (c.active === false) return 'off';
+  const at = c.last_active_at ? new Date(c.last_active_at).getTime() : 0;
+  return at && Date.now() - at <= LIVE_WINDOW_MS ? 'live' : 'sleeping';
 }
 
 router.get('/', async (req, res) => {
@@ -44,11 +54,11 @@ router.post('/', async (req, res) => {
     const b = req.body || {};
     const slug = slugify(b.slug || b.name);
     const r = await query(
-      `INSERT INTO characters (user_id, name, slug, tagline, greeting, bio, personality, reply_style, extra_rules, languages, tags, visibility, active, example_messages, typing_profile, knowledge_base, social_links, drive_link, source_links, sources_verified)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20) RETURNING *`,
+      `INSERT INTO characters (user_id, name, slug, tagline, greeting, bio, personality, reply_style, extra_rules, languages, tags, visibility, active, example_messages, typing_profile, avatar, knowledge_base, social_links, drive_link, source_links, sources_verified)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21) RETURNING *`,
       [req.user.id, b.name || 'New Character', slug, b.tagline || '', b.greeting || '', b.bio || '', b.personality || '',
        b.reply_style || '', b.extra_rules || '', asArray(b.languages).length ? b.languages : ['English'], asArray(b.tags), b.visibility || 'private',
-       b.active !== false, jsonb(asArray(b.example_messages)), jsonb(b.typing_profile || null),
+       b.active !== false, jsonb(asArray(b.example_messages)), jsonb(b.typing_profile || null), b.avatar || '',
        b.knowledge_base || '', jsonb(asArray(b.social_links)), b.drive_link || '', jsonb(asArray(b.source_links)), !!b.sources_verified]
     ).catch(e => {
       if (e.code === '23505') throw new Error('slug already used — pick another');
@@ -92,6 +102,14 @@ router.delete('/:id', async (req, res) => {
   const r = await query('DELETE FROM characters WHERE id=$1 AND user_id=$2 RETURNING id', [req.params.id, req.user.id]);
   if (!r.rows.length) return res.status(404).json({ error: 'not found' });
   res.json({ ok: true });
+});
+
+router.patch('/:id/active', async (req, res) => {
+  const active = req.body?.active === true;
+  const r = await query('UPDATE characters SET active=$1, updated_at=now() WHERE id=$2 AND user_id=$3 RETURNING *',
+    [active, req.params.id, req.user.id]);
+  if (!r.rows.length) return res.status(404).json({ error: 'not found' });
+  res.json({ character: normalizeCharacter(r.rows[0]) });
 });
 
 export default router;

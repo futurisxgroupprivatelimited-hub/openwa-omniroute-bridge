@@ -194,18 +194,16 @@
       <div id="adminTab-llm" class="hidden">
         <div class="grid2">
           <div class="card">
-            <h3>Current gateway</h3>
-            <div class="kv"><span>Status</span><span><span class="badge" id="llmStatusBadge">—</span></span></div>
-            <div class="kv"><span>Base URL</span><code id="llmBase">—</code></div>
-            <div class="kv"><span>Bearer token</span><code id="llmBearer">—</code></div>
-            <div class="kv"><span>Default model</span><code id="llmModel">—</code></div>
-            <div class="llm-actions">
-              <button class="btn sm" onclick="testCurrentLlm()">Test current config</button>
+            <h3>LLM Endpoints <span class="hint">one active gateway at a time</span></h3>
+            <div class="llm-summary">
+              <span>Total calls <strong id="llmTotalCalls">0</strong></span>
+              <span>Tokens <strong id="llmTotalTokens">0</strong></span>
+              <span>Active <strong id="llmActiveName">—</strong></span>
             </div>
-            <div class="test-result" id="llmTestResult"></div>
+            <div id="llmEndpointList"><div class="muted" style="padding:10px 0">Loading…</div></div>
           </div>
           <div class="card">
-            <h3>Set LLM gateway <span class="hint">any OpenAI-compatible endpoint</span></h3>
+            <h3>Add / edit endpoint <span class="hint">any OpenAI-compatible endpoint</span></h3>
             <label>Quick preset</label>
             <div class="seg llm-presets" id="llmPresets">
               <button data-b="http://host.docker.internal:20128" data-m="big-pickle" class="active">OmniRoute</button>
@@ -213,13 +211,16 @@
               <button data-b="http://localhost:11434/v1" data-m="llama3.1">Ollama</button>
               <button data-b="https://api.groq.com/openai/v1" data-m="llama-3.1-8b-instant">Groq</button>
             </div>
+            <label>Name</label><input id="adLlmName" placeholder="Production gateway">
             <label>Base URL</label><input id="adLlmBase" placeholder="http://host.docker.internal:20128">
             <label>API / bearer token <span class="hint">leave empty for local endpoints</span></label><input id="adLlmBearer" type="password" placeholder="sk-… or empty">
-            <label>Default model</label><input id="adLlmModel" placeholder="big-pickle">
+            <label>Model</label><input id="adLlmModel" placeholder="big-pickle">
+            <div class="switch-row"><span>Activate now</span><label class="switch"><input id="adLlmActive" type="checkbox"><span class="slider"></span></label></div>
             <div class="llm-actions">
-              <button class="btn success" onclick="saveLlm()">Save gateway</button>
-              <button class="btn sm" onclick="testNewLlm()">Test new config</button>
+              <button class="btn success" onclick="saveLlm()">Save endpoint</button>
+              <button class="btn sm" onclick="testNewLlm()">Test config</button>
             </div>
+            <div class="test-result" id="llmTestResult"></div>
           </div>
         </div>
       </div>
