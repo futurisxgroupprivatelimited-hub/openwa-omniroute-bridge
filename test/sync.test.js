@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { filterMissedRows, syncWindow } from '../src/services/bridge.js';
+import { filterMissedRows, syncWindow, isTooOldToReply } from '../src/services/bridge.js';
 
 // ── filterMissedRows ──────────────────────────────────────────────
 // Pure decision logic behind reconnect/periodic sync: given OpenWA history rows,
@@ -19,16 +19,15 @@ const mk = (over = {}) => ({
 test('filterMissedRows: returns unseen incoming text messages', () => {
   const rows = [mk({ waMessageId: 'WA_1', body: 'first' }), mk({ waMessageId: 'WA_2', body: 'second' })];
   const missed = filterMissedRows(rows, {});
-  assert.deepEqual(missed, [
-    { body: 'first', remote_id: 'WA_1' },
-    { body: 'second', remote_id: 'WA_2' },
-  ]);
+  assert.equal(missed.length, 2);
+  assert.deepEqual(missed.map(m => [m.body, m.remote_id]), [['first', 'WA_1'], ['second', 'WA_2']]);
 });
 
 test('filterMissedRows: skips messages already mirrored by remote_id', () => {
   const rows = [mk({ waMessageId: 'WA_1' }), mk({ waMessageId: 'WA_2' })];
   const missed = filterMissedRows(rows, { knownRemoteIds: ['WA_1'] });
-  assert.deepEqual(missed, [{ body: 'hello', remote_id: 'WA_2' }]);
+  assert.equal(missed.length, 1);
+  assert.equal(missed[0].remote_id, 'WA_2');
 });
 
 test('filterMissedRows: skips outgoing/fromMe and empty bodies', () => {
@@ -39,7 +38,8 @@ test('filterMissedRows: skips outgoing/fromMe and empty bodies', () => {
     mk({ waMessageId: 'IN', body: 'kept' }),
   ];
   const missed = filterMissedRows(rows, {});
-  assert.deepEqual(missed, [{ body: 'kept', remote_id: 'IN' }]);
+  assert.equal(missed.length, 1);
+  assert.equal(missed[0].remote_id, 'IN');
 });
 
 test('filterMissedRows: respects the since window (older rows excluded)', () => {
@@ -71,13 +71,20 @@ test('filterMissedRows: dedups by body when remote_id is missing', () => {
     mk({ waMessageId: null, body: 'other' }),
   ];
   const missed = filterMissedRows(rows, { seenBodies: ['repeat'] });
-  assert.deepEqual(missed, [{ body: 'other', remote_id: null }]);
+  assert.equal(missed.length, 1);
+  assert.equal(missed[0].remote_id, null);
 });
 
 test('filterMissedRows: trimming and case-insensitive remote matching', () => {
   const rows = [mk({ waMessageId: 'WA_1', body: '  padded  ' })];
   const missed = filterMissedRows(rows, { knownRemoteIds: ['WA_1'] });
   assert.deepEqual(missed, []);
+});
+
+test('filterMissedRows: each result carries the source timestamp (ts)', () => {
+  const at = new Date('2026-08-04T10:00:00Z');
+  const missed = filterMissedRows([mk({ waMessageId: 'WA_1', createdAt: at })], {});
+  assert.equal(missed[0].ts, at);
 });
 
 // ── syncWindow ────────────────────────────────────────────────────
@@ -102,4 +109,34 @@ test('syncWindow: defaults to one hour ago', () => {
   const after = Date.now() - 60 * 60 * 1000 + 5000;
   const w = syncWindow({});
   assert.ok(w.getTime() >= before && w.getTime() <= after, `window ${w.toISOString()} not within 1h`);
+});
+
+// ── isTooOldToReply (ban-safety age gate) ────────────────────────
+const NOW = new Date('2026-08-04T12:00:00Z').getTime();
+const MAX_AGE = 48 * 60 * 60 * 1000;
+
+test('isTooOldToReply: fresh message (within window) is replyable', () => {
+  const fresh = { body: 'hi', ts: new Date(NOW - 1000) };
+  assert.equal(isTooOldToReply(fresh, NOW, MAX_AGE), false);
+});
+
+test('isTooOldToReply: message older than the window is suppressed', () => {
+  const old = { body: 'hi', ts: new Date(NOW - 49 * 60 * 60 * 1000) };
+  assert.equal(isTooOldToReply(old, NOW, MAX_AGE), true);
+});
+
+test('isTooOldToReply: exactly at the window boundary is not suppressed', () => {
+  assert.equal(isTooOldToReply({ ts: new Date(NOW - MAX_AGE) }, NOW, MAX_AGE), false);
+});
+
+test('isTooOldToReply: accepts raw ISO string and number timestamps', () => {
+  assert.equal(isTooOldToReply({ ts: new Date(NOW - 1).toISOString() }, NOW, MAX_AGE), false);
+  assert.equal(isTooOldToReply({ ts: NOW - 49 * 60 * 60 * 1000 }, NOW, MAX_AGE), true);
+});
+
+test('isTooOldToReply: missing/invalid timestamp is treated as fresh', () => {
+  assert.equal(isTooOldToReply({ body: 'hi' }, NOW, MAX_AGE), false);
+  assert.equal(isTooOldToReply({ ts: null }, NOW, MAX_AGE), false);
+  assert.equal(isTooOldToReply({ ts: 'not-a-date' }, NOW, MAX_AGE), false);
+  assert.equal(isTooOldToReply(null, NOW, MAX_AGE), false);
 });

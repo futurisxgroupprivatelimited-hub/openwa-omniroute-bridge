@@ -516,7 +516,7 @@ export function filterMissedRows(rows, { since, knownRemoteIds, seenBodies }) {
     const remoteId = row.waMessageId || row.id || row.key || null;
     if (remoteId && known.has(remoteId)) continue;
     if (!remoteId && bodies.has(text)) continue;
-    missed.push({ body: text, remote_id: remoteId });
+    missed.push({ body: text, remote_id: remoteId, ts });
   }
   return missed;
 }
@@ -554,6 +554,17 @@ export function syncWindow(sessionRow, explicitSince) {
   return new Date(Date.now() - 60 * 60 * 1000);
 }
 
+// Pure: a catch-up reply is suppressed when the missed message went stale while
+// we were offline (replying days later is an automation red flag). Absent
+// timestamp = assume fresh (behave like today's traffic). Exported for tests.
+export function isTooOldToReply(missedMessage, now, maxAgeMs) {
+  const ts = missedMessage?.ts || missedMessage?.createdAt || missedMessage?.created_at || missedMessage?.timestamp;
+  if (!ts) return false;
+  const t = ts instanceof Date ? ts.getTime() : new Date(ts).getTime();
+  if (!Number.isFinite(t)) return false;
+  return t < now - maxAgeMs;
+}
+
 export async function syncSessionHistory(user, sessionRow, { since = null, reply = true } = {}) {
   if (!user.openwa_base_url || !user.openwa_api_key) return { missed: 0, replied: 0 };
   const fresh = await query('SELECT * FROM wa_sessions WHERE id=$1', [sessionRow.id]);
@@ -564,6 +575,7 @@ export async function syncSessionHistory(user, sessionRow, { since = null, reply
   const chats = await listChatsForSync(user, s);
   let missedTotal = 0;
   const replied = [];
+  let replyBudget = reply ? config.syncReplyMaxChats : 0;
 
   for (const chatId of chats) {
     try {
@@ -573,14 +585,25 @@ export async function syncSessionHistory(user, sessionRow, { since = null, reply
       for (const m of missed) {
         await persistMessage(user.id, s.id, chatId, 'incoming', m.body, null, m.remote_id);
       }
-      if (!reply) continue;
-      const character = await resolveCharacter(user, { chatId, session: s });
+      if (!reply || replyBudget <= 0) continue;
       const latest = missed[missed.length - 1];
+      // Never answer a message that went stale while we were offline — a human
+      // wouldn't reply days later. Keep it mirrored (context) but stay silent.
+      if (isTooOldToReply(latest, Date.now(), config.syncReplyMaxAgeMs)) {
+        await logLine(`[sync] ${user.email} ${chatId}: ${missed.length} missed msg(s) older than ${config.syncReplyMaxAgeMs / 36e5}h — mirrored, no reply`);
+        continue;
+      }
+      const character = await resolveCharacter(user, { chatId, session: s });
       const history = await fetchHistory(user, s, chatId, latest.body);
       const messages = [{ role: 'system', content: buildSystemPrompt(character) }, ...history, { role: 'user', content: latest.body }];
       const sent = await sendHumanReply(user, { session: s, chatId, character, messages });
-      if (sent) replied.push(chatId);
+      if (sent) {
+        replied.push(chatId);
+        replyBudget -= 1;
+      }
       await logLine(`[sync] ${user.email} ${chatId}: caught up ${missed.length} missed msg(s)`);
+      // Drip: space out catch-up replies so we never burst after a reconnect.
+      if (replyBudget > 0) await sleep(config.syncReplyDripMs + rand(0, 4000));
     } catch (e) {
       await logLine(`[sync] ${user.email} ${chatId}: ${e.message}`);
     }

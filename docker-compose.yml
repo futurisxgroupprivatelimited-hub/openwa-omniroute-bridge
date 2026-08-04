@@ -33,6 +33,9 @@ services:
       OMNIROUTE_BASE_URL: ${OMNIROUTE_BASE_URL:-http://omniroute:20128}
       ADMIN_EMAIL: ${ADMIN_EMAIL:-admin@openbridge.local}
       ADMIN_PASSWORD: ${ADMIN_PASSWORD:-admin12345}
+      SYNC_REPLY_DRIP_MS: ${SYNC_REPLY_DRIP_MS:-12000}
+      SYNC_REPLY_MAX_CHATS: ${SYNC_REPLY_MAX_CHATS:-5}
+      SYNC_REPLY_MAX_AGE_MS: ${SYNC_REPLY_MAX_AGE_MS:-172800000}
     ports:
       - "3001:3001"
     volumes:
