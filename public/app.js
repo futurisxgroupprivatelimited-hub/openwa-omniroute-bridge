@@ -241,7 +241,7 @@ async function loadCharacters(){
   const el=$('charList');
   if(!characters.length){el.innerHTML='<div class="empty">No characters yet. Create your first persona.</div>';return}
   el.innerHTML=characters.map(c=>{
-    const webhook = me?`${location.origin}/webhook/${me.webhook_token}/${c.slug}`:'';
+    const webhook = me?`${me.webhook_base}/webhook/${me.webhook_token}/${c.slug}`:'';
     return '<div class="char-form" data-id="'+c.id+'">'+
       '<div class="head">'+charAvatar(c)+
       '<div style="flex:1"><strong>'+esc(c.name)+'</strong> '+charStatusBadge(c)+

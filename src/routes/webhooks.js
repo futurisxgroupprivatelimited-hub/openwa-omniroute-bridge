@@ -3,22 +3,10 @@ import { Router } from 'express';
 import { query } from '../db.js';
 import { requireUser } from '../auth.js';
 import { webhookUrl } from '../services/bridge.js';
-import { config } from '../config.js';
+import { webhookBaseFor } from '../webhook-base.js';
 
 const router = Router();
 router.use(requireUser);
-
-// Webhook URLs must be reachable FROM the tenant's OpenWA instance. When WEBHOOK_BASE is
-// explicitly set in the environment we honour it; otherwise we derive the base from the
-// actual request the admin used to reach this dashboard (Host header) — which is far more
-// likely to be a valid hostname/IP than a hardcoded localhost. OpenWA's SSRF guard only
-// delivers to public hosts unless the target is allowlisted in its SSRF_ALLOWED_HOSTS.
-function webhookBaseFor(req) {
-  if (process.env.WEBHOOK_BASE) return config.webhookBase;
-  const proto = req.headers['x-forwarded-proto']?.split(',')[0]?.trim() || 'http';
-  const host = req.headers.host || req.headers['x-forwarded-host'] || `localhost:${config.port}`;
-  return `${proto}://${host}`.replace(/\/$/, '');
-}
 
 router.get('/', async (req, res) => {
   const chars = await query('SELECT * FROM characters WHERE user_id=$1 AND active', [req.user.id]);

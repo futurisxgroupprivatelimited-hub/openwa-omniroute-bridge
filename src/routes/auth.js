@@ -4,6 +4,7 @@ import { Router } from 'express';
 import { query } from '../db.js';
 import { signToken, publicUser, requireUser } from '../auth.js';
 import { config } from '../config.js';
+import { webhookBaseFor } from '../webhook-base.js';
 
 const router = Router();
 
@@ -46,7 +47,7 @@ router.post('/login', async (req, res) => {
 });
 
 router.get('/me', requireUser, (req, res) => {
-  res.json({ user: publicUser(req.user) });
+  res.json({ user: { ...publicUser(req.user), webhook_base: webhookBaseFor(req) } });
 });
 
 router.get('/admin-info', (req, res) => {
