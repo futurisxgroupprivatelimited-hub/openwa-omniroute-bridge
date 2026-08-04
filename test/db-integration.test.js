@@ -68,6 +68,9 @@ before(async () => {
       session_id uuid, chat_id text NOT NULL, direction text NOT NULL,
       body text NOT NULL, character_id uuid, remote_id text,
       created_at timestamptz NOT NULL DEFAULT now())`);
+    // Mirror the production dedup index so persistMessage idempotency is exercised.
+    await pool.query(`CREATE UNIQUE INDEX IF NOT EXISTS idx_test_messages_remote_dedup
+      ON messages(user_id, remote_id) WHERE remote_id IS NOT NULL`);
     await pool.query(`CREATE TABLE IF NOT EXISTS playground_chats (
       id uuid PRIMARY KEY DEFAULT gen_random_uuid(), user_id uuid REFERENCES users(id) ON DELETE CASCADE,
       character_id uuid, role text NOT NULL, content text NOT NULL,
@@ -237,4 +240,42 @@ test('playground: live chat threads aggregate messages per chat', async (t) => {
     `SELECT direction FROM messages WHERE user_id=$1 AND character_id=$2 AND chat_id=$3 ORDER BY created_at ASC`,
     [uid, cid, '977x@c.us']);
   assert.deepEqual(full.rows.map(r => r.direction), ['incoming', 'outgoing', 'incoming']);
+});
+
+// ── message mirroring idempotency (webhook + sync dedup) ─────────
+test('persistMessage: same remote_id for the same user is stored exactly once', async (t) => {
+  if (!guard(t)) return;
+  const bridge = await import('../src/services/bridge.js');
+  const chat = 'sync-test@c.us';
+  await bridge.persistMessage(uid, null, chat, 'incoming', 'hello world', null, 'WA_DUP_1');
+  await bridge.persistMessage(uid, null, chat, 'incoming', 'hello world', null, 'WA_DUP_1');
+  await bridge.persistMessage(uid, null, chat, 'incoming', 'hello world', null, 'WA_DUP_1');
+  const r = await pool.query(
+    `SELECT count(*)::int AS n FROM messages WHERE user_id=$1 AND remote_id=$2`, [uid, 'WA_DUP_1']);
+  assert.equal(r.rows[0].n, 1);
+});
+
+test('persistMessage: two users may mirror the same WhatsApp remote_id', async (t) => {
+  if (!guard(t)) return;
+  const bridge = await import('../src/services/bridge.js');
+  const other = (await pool.query(
+    `INSERT INTO users (email, password_hash, name) VALUES ($1,'x','sync-other') RETURNING id`,
+    [`sync-other-${Date.now()}@test.local`])).rows[0].id;
+  try {
+    await bridge.persistMessage(uid, null, 'shared@c.us', 'incoming', 'shared msg', null, 'WA_SHARED');
+    await bridge.persistMessage(other, null, 'shared@c.us', 'incoming', 'shared msg', null, 'WA_SHARED');
+    const r = await pool.query(
+      `SELECT count(*)::int AS n FROM messages WHERE remote_id='WA_SHARED'`);
+    assert.equal(r.rows[0].n, 2); // one per user — the per-user index must not block this
+  } finally {
+    await pool.query('DELETE FROM users WHERE id=$1', [other]);
+  }
+});
+
+test('messages: wa_sessions.last_synced_at column exists (migration 007)', async (t) => {
+  if (!guard(t)) return;
+  const r = await pool.query(
+    `SELECT count(*)::int AS n FROM information_schema.columns
+     WHERE table_name='wa_sessions' AND column_name='last_synced_at'`);
+  assert.equal(r.rows[0].n, 1);
 });

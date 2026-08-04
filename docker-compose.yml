@@ -37,6 +37,9 @@ services:
       - "3001:3001"
     volumes:
       - ./public:/app/public:ro
+    networks:
+      - default
+      - openwa-network
 
   omniroute:
     image: diegosouzapw/omniroute:latest
@@ -62,3 +65,7 @@ services:
 volumes:
   pgdata:
   omniroute-data:
+
+networks:
+  openwa-network:
+    external: true

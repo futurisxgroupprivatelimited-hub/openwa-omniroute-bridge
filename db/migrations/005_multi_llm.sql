@@ -36,7 +36,7 @@ SELECT
   'Legacy Gateway', 
   COALESCE(MAX(CASE WHEN key='llm_base_url' THEN value#>>'{}' END), 'http://localhost:20128'),
   MAX(CASE WHEN key='llm_bearer' THEN value#>>'{}' END),
-  COALESCE(MAX(CASE WHEN key='llm_default_model' THEN value#>>'{}' END), 'big-pickle'),
+  COALESCE(MAX(CASE WHEN key='llm_default_model' THEN value#>>'{}' END), 'antigravity/gemini-2.5-flash'),
   true
 FROM admin_settings
 WHERE key IN ('llm_base_url', 'llm_bearer', 'llm_default_model')

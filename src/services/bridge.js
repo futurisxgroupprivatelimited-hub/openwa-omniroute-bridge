@@ -2,6 +2,7 @@ import { query } from '../db.js';
 import { askModel } from './omniroute.js';
 import * as openwa from './openwa.js';
 import { config } from '../config.js';
+import { getGateway } from './gateway.js';
 import { createNotification, notifyOwnerAndAdmins } from './notifications.js';
 
 const ONLINE = new Set(['ready', 'active', 'connected']);
@@ -189,52 +190,124 @@ export function looksNonHuman(text) {
 export function replyProblem(reply) {
   const text = String(reply || '').trim();
   if (!text) return 'empty reply';
+  // Emoji-only or near-empty filler ("😊", "😂😂", "ok") reads like a bot glitch.
+  if (!/[A-Za-z\u0400-\uFFFF\d]/.test(text.replace(/[\u{1F000}-\u{1FAFF}\u2600-\u27BF\uFE0F]/gu, ''))) {
+    return 'empty reply';
+  }
+  if (text.length < 2) return 'empty reply';
   if (looksNonHuman(text)) return 'reply exposed AI/error content';
   return null;
+}
+
+// Fold a reply into a comparable key so we can catch exact repeats.
+export function normalizeReply(text) {
+  return String(text || '')
+    .toLowerCase()
+    .replace(/[^\p{L}\p{N}\s]/gu, '')
+    .replace(/\s+/g, ' ')
+    .trim()
+    .slice(0, 200);
 }
 
 // Generate a reply, type it out, send it. Returns the sent text, or null when the
 // reply was suppressed (empty / bot-like / model failure) — in which case the end
 // user receives NOTHING and the owner + admins are notified instead.
+// Short, human-sounding recovery messages used when the LLM fails to produce a
+// reply — so a real user is never left hanging. Rotates per chat to avoid repeats.
+const FALLBACK_REPLIES = [
+  'Hmm, I didn’t catch that 😅 Say it again?',
+  'Sorry, you said something but it didn’t come through on my side. What was it?',
+  'Hey, I missed the last bit — mind repeating that?',
+  'Yo! Sorry, my phone was acting up 😅 What did you say?',
+  'Didn’t quite get that — could you send it again?',
+];
+export function fallbackReply(chatId) {
+  const h = String(chatId || '').split('').reduce((a, c) => (a * 31 + c.charCodeAt(0)) >>> 0, 7);
+  return FALLBACK_REPLIES[h % FALLBACK_REPLIES.length];
+}
+
+// Actually deliver a text reply (typing pattern + send + persist). Shared by the
+// normal path and the auto-recovery path.
+async function deliverReply(user, session, chatId, character, text) {
+  if (!text) return '';
+  const openwaSessionId = session?.openwa_session_id || null;
+  await humanTypingPattern(user, session, chatId, text.length, character?.typing_profile);
+  await openwa.sendText({ base: user.openwa_base_url, apiKey: user.openwa_api_key, sessionId: openwaSessionId, chatId, text });
+  await persistMessage(user.id, session?.id, chatId, 'outgoing', text, character?.id || null);
+  return text;
+}
+
+// Generate a reply, type it out, send it. Returns the sent text.
+// When the LLM fails or returns nothing usable, the user STILL receives a natural
+// short reply (auto-recovery) and the owner + admins are notified about the issue.
 export async function sendHumanReply(user, { session, chatId, character, messages }) {
   let reply;
   try {
     reply = await askModel(user, messages);
   } catch (e) {
     const err = String(e?.message || e || '').slice(0, 400);
+    const gw = await getGateway().catch(() => null);
+    const lines = [
+      `User: ${user.email}`,
+      `Chat: ${chatId}`,
+      `Session: ${session?.name || session?.openwa_session_id || session?.id || 'unknown'}`,
+      `Character: ${character?.name || character?.slug || 'none'}`,
+      `Model: ${user.model || gw?.llm_default_model || 'unknown'}${user.fallback_model && user.fallback_model !== user.model ? ` (fallback: ${user.fallback_model})` : ''}`,
+      `Gateway: ${gw?.llm_base_url || config.omnirouteBase}`,
+      `Error: ${err}`,
+      'Auto-recovery: a natural fallback reply was sent so the user was not left unanswered.',
+    ];
+    const body = lines.join('\n').slice(0, 2000);
     await notifyOwnerAndAdmins(user.id, {
       type: 'llm_failed', level: 'error', sessionId: session?.id || null,
-      title: 'AI reply failed — nothing was sent',
-      body: `${chatId}: no reply was delivered (staying silent). ${err}`,
+      title: 'AI reply failed — fallback sent',
+      body,
     });
     await logLine(`[llm-fail] ${user.email} ${chatId}: ${err}`);
-    return null;
+    const fallback = fallbackReply(chatId);
+    await deliverReply(user, session, chatId, character, fallback);
+    await logLine(`[llm-recover] ${user.email} ${chatId}: sent fallback "${fallback.slice(0, 50)}"`);
+    return fallback;
   }
 
-  const problem = replyProblem(reply);
+  // Never repeat the last message the character already sent in this chat —
+  // a duplicated "Hey, sorry for the late reply!" reads like a bot glitch.
+  const prev = await query(
+    'SELECT body FROM messages WHERE user_id=$1 AND chat_id=$2 AND direction=$3 ORDER BY created_at DESC LIMIT 1',
+    [user.id, chatId, 'outgoing']
+  );
+  const prevText = String(prev.rows[0]?.body || '').trim();
+  let problem = replyProblem(reply);
+  if (!problem && prevText && normalizeReply(reply) === normalizeReply(prevText)) {
+    problem = 'duplicate of previous reply';
+  }
   if (problem) {
     await notifyOwnerAndAdmins(user.id, {
       type: problem === 'empty reply' ? 'llm_empty' : 'llm_exposed', level: 'warning', sessionId: session?.id || null,
-      title: problem === 'empty reply' ? 'Empty AI reply suppressed' : 'Bot-like reply suppressed',
-      body: `${chatId}: the model produced "${problem}". The message was NOT sent to the user to keep it human. Raw reply: ${String(reply || '').slice(0, 200)}`,
+      title: problem === 'empty reply' ? 'AI gave empty reply — fallback sent' : 'Bot-like reply replaced — fallback sent',
+      body: `${chatId}: the model produced "${problem}". A natural fallback reply was sent instead so the user is not left hanging. Raw reply: ${String(reply || '').slice(0, 200)}`,
     });
     await logLine(`[llm-suppress] ${user.email} ${chatId}: ${problem}`);
-    return null;
+    const fallback = fallbackReply(chatId);
+    await deliverReply(user, session, chatId, character, fallback);
+    await logLine(`[llm-recover] ${user.email} ${chatId}: sent fallback "${fallback.slice(0, 50)}"`);
+    return fallback;
   }
 
   const { text: replyText, media } = splitMediaTokens(reply);
+  const openwaSessionId = session?.openwa_session_id || null;
   await humanTypingPattern(user, session, chatId, replyText.length, character?.typing_profile);
   if (replyText) {
-    await openwa.sendText({ base: user.openwa_base_url, apiKey: user.openwa_api_key, sessionId, chatId, text: replyText });
+    await openwa.sendText({ base: user.openwa_base_url, apiKey: user.openwa_api_key, sessionId: openwaSessionId, chatId, text: replyText });
   }
   for (const url of media.slice(0, 2)) {
     const direct = driveDirectUrl(url);
     try {
-      await openwa.sendMedia({ base: user.openwa_base_url, apiKey: user.openwa_api_key, sessionId, chatId, file: direct, caption: replyText.slice(0, 200) });
+      await openwa.sendMedia({ base: user.openwa_base_url, apiKey: user.openwa_api_key, sessionId: openwaSessionId, chatId, file: direct, caption: replyText.slice(0, 200) });
       await logLine(`[media] ${user.email} ${chatId} sent image`);
     } catch (e) {
       await logLine(`[media] ${user.email} send failed (${e.message}); sending link as text`);
-      await openwa.sendText({ base: user.openwa_base_url, apiKey: user.openwa_api_key, sessionId, chatId, text: direct }).catch(() => {});
+      await openwa.sendText({ base: user.openwa_base_url, apiKey: user.openwa_api_key, sessionId: openwaSessionId, chatId, text: direct }).catch(() => {});
     }
   }
   await persistMessage(user.id, session?.id, chatId, 'outgoing', replyText, character?.id || null);
@@ -254,6 +327,14 @@ export async function handleInboundMessage(user, event, slug) {
     throw new Error('tenant has no OpenWA base/api key configured');
   }
 
+  // Idempotency: if the periodic sync already mirrored this message (its
+  // WhatsApp id is the same one we store), don't reply a second time.
+  const remoteId = data.id || data.key || null;
+  if (remoteId && await messageExists(user.id, chatId, text, remoteId)) {
+    await logLine(`[msg] ${user.email} ${chatId}: already handled (sync) — skipping`);
+    return;
+  }
+
   const sessionId = event.sessionId || data.sessionId;
   let session = null;
   if (sessionId) {
@@ -269,7 +350,7 @@ export async function handleInboundMessage(user, event, slug) {
   const history = await fetchHistory(user, session, chatId, text);
   const messages = buildCharacterMessages(character, history, text);
 
-  await persistMessage(user.id, session?.id, chatId, 'incoming', text, character?.id || null, data.id || data.key || null);
+  await persistMessage(user.id, session?.id, chatId, 'incoming', text, character?.id || null, remoteId);
 
   const sent = await sendHumanReply(user, { session, chatId, character, messages });
   await logLine(`[llm] -> ${user.email} ${chatId}: ${sent ? sent.slice(0, 60) : '(suppressed / not sent)'}`);
@@ -280,8 +361,12 @@ export async function handleInboundMessage(user, event, slug) {
 }
 
 export async function persistMessage(userId, sessionDbId, chatId, direction, body, characterId, remoteId) {
+  // Idempotent: the per-user unique index on (user_id, remote_id) means a message
+  // mirrored by both the webhook and the sync is stored exactly once per user.
   await query(
-    'INSERT INTO messages (user_id, session_id, chat_id, direction, body, character_id, remote_id) VALUES ($1,$2,$3,$4,$5,$6,$7)',
+    `INSERT INTO messages (user_id, session_id, chat_id, direction, body, character_id, remote_id)
+     VALUES ($1,$2,$3,$4,$5,$6,$7)
+     ON CONFLICT (user_id, remote_id) WHERE remote_id IS NOT NULL DO NOTHING`,
     [userId, sessionDbId || null, chatId, direction, body, characterId || null, remoteId || null]
   );
   if (characterId) {
@@ -377,10 +462,13 @@ export function webhookUrl(user, character, base = config.webhookBase) {
   return character ? `${base}/webhook/${user.webhook_token}/${character.slug}` : `${base}/webhook/${user.webhook_token}`;
 }
 
-// ── Reconnect catch-up ───────────────────────────────────────────
-// After a session comes back online we wait a few seconds for pending
-// deliveries, then re-read recent history per chat, persist anything we
-// missed while offline, and reply once to the latest missed message.
+// ── Reconnect catch-up + periodic sync ─────────────────────────
+// OpenWA persists every chat message in its own database, exposed via
+// GET /api/sessions/:id/messages (and /chats). We use the tenant's OpenWA API
+// key to reconcile our local mirror: after a reconnect, or periodically, we
+// list every chat OpenWA knows about, pull recent history per chat, persist
+// any incoming messages we missed (webhook gaps / offline time), and reply
+// once per chat to the latest missed message with full context.
 
 async function messageExists(userId, chatId, body, remoteId) {
   if (remoteId) {
@@ -395,10 +483,48 @@ async function messageExists(userId, chatId, body, remoteId) {
   return r.rows.length > 0;
 }
 
-async function collectMissed(user, sessionRow, chatId) {
-  const since = sessionRow.disconnected_at
-    ? new Date(new Date(sessionRow.disconnected_at).getTime() - 5000)
-    : null;
+// Every chat OpenWA has seen for this session (chat list first — this is what
+// catches brand-new chats that messaged while we were away). Falls back to the
+// chats we already mirrored so a chat-list failure never blocks catch-up.
+async function listChatsForSync(user, sessionRow) {
+  try {
+    const chats = await openwa.listChats({
+      base: user.openwa_base_url, apiKey: user.openwa_api_key,
+      sessionId: sessionRow.openwa_session_id, limit: 500,
+    });
+    const ids = chats.map(c => c.id).filter(Boolean);
+    if (ids.length) return ids;
+  } catch {
+    // fall through to local mirror
+  }
+  const r = await query('SELECT DISTINCT chat_id FROM messages WHERE user_id=$1 AND session_id=$2', [user.id, sessionRow.id]);
+  return r.rows.map(x => x.chat_id);
+}
+
+// Pure: decide which history rows are incoming messages we have not mirrored.
+// Exported separately so the dedup/ordering rules are unit-testable without a DB.
+export function filterMissedRows(rows, { since, knownRemoteIds, seenBodies }) {
+  const known = new Set(knownRemoteIds || []);
+  const bodies = new Set(seenBodies || []);
+  const missed = [];
+  for (const row of rows) {
+    const text = String(row.body || '').trim();
+    if (!text) continue;
+    if (row.direction === 'outgoing' || row.fromMe) continue;
+    const ts = row.createdAt || row.created_at || row.timestamp;
+    if (since && ts && new Date(ts).getTime() < since.getTime()) continue;
+    const remoteId = row.waMessageId || row.id || row.key || null;
+    if (remoteId && known.has(remoteId)) continue;
+    if (!remoteId && bodies.has(text)) continue;
+    missed.push({ body: text, remote_id: remoteId });
+  }
+  return missed;
+}
+
+// Incoming messages newer than `since` (default: last sync, else disconnected_at)
+// that we have not already mirrored. remoteId must be the WhatsApp message id
+// (waMessageId) — the same value the webhook carries as data.id — so dedup holds.
+async function collectMissed(user, sessionRow, chatId, since) {
   let rows;
   try {
     rows = await openwa.fetchChatHistory({
@@ -408,58 +534,82 @@ async function collectMissed(user, sessionRow, chatId) {
   } catch {
     return [];
   }
-  const missed = [];
+  const knownRemoteIds = [];
+  const seenBodies = [];
   for (const row of rows) {
-    const text = String(row.body || '').trim();
-    if (!text) continue;
-    if (row.direction === 'outgoing' || row.fromMe) continue;
-    const ts = row.createdAt || row.created_at || row.timestamp;
-    if (since && ts && new Date(ts).getTime() < since.getTime()) continue;
-    if (await messageExists(user.id, chatId, text, row.id || row.key || null)) continue;
-    missed.push({ body: text, remote_id: row.id || row.key || null });
+    const remoteId = row.waMessageId || row.id || row.key || null;
+    if (remoteId && await messageExists(user.id, chatId, String(row.body || '').trim(), remoteId)) knownRemoteIds.push(remoteId);
+    else if (!remoteId && await messageExists(user.id, chatId, String(row.body || '').trim(), null)) seenBodies.push(String(row.body || '').trim());
   }
-  return missed;
+  return filterMissedRows(rows, { since, knownRemoteIds, seenBodies });
+}
+
+// The since-window for a session: prefer the explicit window passed by callers
+// (reconnect uses disconnected_at), otherwise our last sync time, otherwise a
+// recent default so a first-time or legacy sync still covers fresh traffic.
+export function syncWindow(sessionRow, explicitSince) {
+  if (explicitSince) return explicitSince;
+  if (sessionRow.last_synced_at) return new Date(new Date(sessionRow.last_synced_at).getTime() - 5000);
+  if (sessionRow.disconnected_at) return new Date(new Date(sessionRow.disconnected_at).getTime() - 5000);
+  return new Date(Date.now() - 60 * 60 * 1000);
+}
+
+export async function syncSessionHistory(user, sessionRow, { since = null, reply = true } = {}) {
+  if (!user.openwa_base_url || !user.openwa_api_key) return { missed: 0, replied: 0 };
+  const fresh = await query('SELECT * FROM wa_sessions WHERE id=$1', [sessionRow.id]);
+  const s = fresh.rows[0] || sessionRow;
+  if (!isOnline(s.status)) return { missed: 0, replied: 0 };
+
+  const windowStart = syncWindow(s, since);
+  const chats = await listChatsForSync(user, s);
+  let missedTotal = 0;
+  const replied = [];
+
+  for (const chatId of chats) {
+    try {
+      const missed = await collectMissed(user, s, chatId, windowStart);
+      if (!missed.length) continue;
+      missedTotal += missed.length;
+      for (const m of missed) {
+        await persistMessage(user.id, s.id, chatId, 'incoming', m.body, null, m.remote_id);
+      }
+      if (!reply) continue;
+      const character = await resolveCharacter(user, { chatId, session: s });
+      const latest = missed[missed.length - 1];
+      const history = await fetchHistory(user, s, chatId, latest.body);
+      const messages = [{ role: 'system', content: buildSystemPrompt(character) }, ...history, { role: 'user', content: latest.body }];
+      const sent = await sendHumanReply(user, { session: s, chatId, character, messages });
+      if (sent) replied.push(chatId);
+      await logLine(`[sync] ${user.email} ${chatId}: caught up ${missed.length} missed msg(s)`);
+    } catch (e) {
+      await logLine(`[sync] ${user.email} ${chatId}: ${e.message}`);
+    }
+  }
+
+  await query('UPDATE wa_sessions SET last_synced_at=now(), updated_at=now() WHERE id=$1', [s.id]);
+
+  if (missedTotal > 0) {
+    await createNotification(user.id, {
+      sessionId: s.id, type: 'catchup_missed', level: 'info',
+      title: `Caught up on ${missedTotal} missed message${missedTotal === 1 ? '' : 's'}`,
+      body: reply
+        ? `Replied in ${replied.length} chat${replied.length === 1 ? '' : 's'} after sync.`
+        : `Synced from OpenWA history; replies will follow current traffic.`,
+    });
+  }
+  return { missed: missedTotal, replied: replied.length };
 }
 
 export async function catchUpSession(user, sessionRow) {
   if (!user.openwa_base_url || !user.openwa_api_key) return;
   await sleep(RECONNECT_WAIT_MS);
-
-  const fresh = await query('SELECT * FROM wa_sessions WHERE id=$1', [sessionRow.id]);
-  const s = fresh.rows[0];
-  if (!s || !isOnline(s.status)) {
-    await logLine(`[catchup] ${user.email} ${sessionRow.openwa_session_id}: session not online, skipping`);
-    return;
-  }
-
-  const chats = await query('SELECT DISTINCT chat_id FROM messages WHERE user_id=$1 AND session_id=$2', [user.id, sessionRow.id]);
-  let missedTotal = 0;
-  const replied = [];
-  for (const { chat_id } of chats.rows) {
-    try {
-      const missed = await collectMissed(user, s, chat_id);
-      if (!missed.length) continue;
-      missedTotal += missed.length;
-      for (const m of missed) {
-        await persistMessage(user.id, sessionRow.id, chat_id, 'incoming', m.body, null, m.remote_id);
-      }
-      const character = await resolveCharacter(user, { chatId: chat_id, session: s });
-      const latest = missed[missed.length - 1];
-      const history = await fetchHistory(user, sessionRow, chat_id, latest.body);
-      const messages = [{ role: 'system', content: buildSystemPrompt(character) }, ...history, { role: 'user', content: latest.body }];
-      const sent = await sendHumanReply(user, { session: s, chatId: chat_id, character, messages });
-      if (sent) replied.push(chat_id);
-      await logLine(`[catchup] ${user.email} ${chat_id}: replied to ${missed.length} missed msg(s)`);
-    } catch (e) {
-      await logLine(`[catchup] ${user.email} ${chat_id}: ${e.message}`);
-    }
-  }
-  if (missedTotal > 0) {
-    await createNotification(user.id, {
-      sessionId: sessionRow.id, type: 'catchup_missed', level: 'info',
-      title: `Caught up on ${missedTotal} missed message${missedTotal === 1 ? '' : 's'}`,
-      body: `Replied in ${replied.length} chat${replied.length === 1 ? '' : 's'} after reconnect.`,
-    });
+  const since = sessionRow.disconnected_at
+    ? new Date(new Date(sessionRow.disconnected_at).getTime() - 5000)
+    : null;
+  try {
+    await syncSessionHistory(user, sessionRow, { since });
+  } catch (e) {
+    await logLine(`[catchup] ${user.email} failed: ${e.message}`);
   }
 }
 

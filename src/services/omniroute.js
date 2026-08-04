@@ -11,35 +11,52 @@ export async function chatCompletion({ model, messages, maxTokens, base, bearer 
   });
   if (!res.ok) {
     const body = await res.text();
-    throw new Error(`LLM ${res.status}: ${body.slice(0, 300)}`);
+    throw new Error(`LLM ${res.status} from ${url} (model=${model}): ${body.slice(0, 300)}`);
   }
   const parsed = await res.json();
   return (parsed.choices?.[0]?.message?.content || '').trim();
 }
 
 export async function askModel(user, messages, gatewayOverride) {
-  const model = user.model || (await getGateway()).llm_default_model || 'big-pickle';
+  const model = user.model || (await getGateway()).llm_default_model || 'antigravity/gemini-2.5-flash';
   const fallback = user.fallback_model || 'auto';
   const maxTokens = user.max_tokens || 80;
   const cap = user.reply_hard_cap || 120;
 
-  try {
-    const reply = await chatCompletion({ model, messages, maxTokens, ...gatewayOverride });
-    return trimReply(reply, cap);
-  } catch (err) {
-    if (fallback && fallback !== model) {
-      const reply = await chatCompletion({ model: fallback, messages, maxTokens, ...gatewayOverride });
-      return trimReply(reply, cap);
+  // Retry empty responses (models occasionally answer a short / ambiguous message
+  // with blank content). Try the primary model, then the fallback, then once more.
+  const attempts = [
+    { model },
+    ...(fallback && fallback !== model ? [{ model: fallback }] : []),
+    { model },
+  ];
+  const recovers = [
+    '',
+    '',
+    'The user seems to expect an answer but you returned nothing. Reply naturally, in character, as a real person would on WhatsApp — 1-2 short sentences. If the message is unclear, ask a friendly clarifying question. NEVER reply with only an emoji or with empty content.',
+  ];
+  let lastErr;
+  for (let i = 0; i < attempts.length; i++) {
+    const { model: m } = attempts[i];
+    let msgs = messages;
+    if (recovers[i]) msgs = [...messages, { role: 'user', content: recovers[i] }];
+    try {
+      const raw = await chatCompletion({ model: m, messages: msgs, maxTokens, ...gatewayOverride });
+      const trimmed = trimReply(raw, cap);
+      if (trimmed) return trimmed;
+    } catch (err) {
+      lastErr = err;
     }
-    throw err;
   }
+  if (lastErr) throw lastErr;
+  throw new Error('LLM returned an empty response after retries');
 }
 
 // Smoke-test an arbitrary OpenAI-compatible endpoint before saving it as the gateway.
 export async function testLlmConfig({ llm_base_url, llm_bearer, model } = {}) {
   const started = Date.now();
   const reply = await chatCompletion({
-    model: model || 'big-pickle',
+    model: model || 'antigravity/gemini-2.5-flash',
     base: llm_base_url || undefined,
     bearer: llm_bearer || undefined,
     messages: [{ role: 'user', content: 'Reply with exactly: OK' }],
@@ -58,7 +75,7 @@ export function trimReply(reply, cap) {
 
 // Ask the LLM for strict JSON and parse it robustly (strips code fences).
 export async function completeJson(user, messages, gatewayOverride) {
-  const model = user.model || (await getGateway()).llm_default_model || 'big-pickle';
+  const model = user.model || (await getGateway()).llm_default_model || 'antigravity/gemini-2.5-flash';
   let lastErr = new Error('LLM did not return a JSON object');
   for (let attempt = 1; attempt <= 3; attempt++) {
     const raw = await chatCompletion({ model, messages, maxTokens: 2500, ...gatewayOverride });

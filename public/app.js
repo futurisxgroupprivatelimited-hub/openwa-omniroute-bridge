@@ -286,9 +286,21 @@ function showCharEditor(c){
   el.innerHTML='<div class="char-form">'+
     '<div class="head"><strong>'+(currentCharId?'Edit Character':'New Character')+'</strong>'+
     ' <span class="spacer"></span>'+
+    '<button class="btn sm" onclick="toggleImag()">✨ Create from prompt</button> '+
     '<button class="btn sm" onclick="toggleAutogen()">⚡ Auto-build from links</button> '+
     '<button class="btn sm success" onclick="saveCharacter()">Save</button> '+
     '<button class="btn sm" onclick="loadCharacters()">Cancel</button></div>'+
+
+    '<div id="imagPanel" class="autogen hidden">'+
+      '<div class="autogen-tip">Describe the character you imagine — a persona, a brand voice, a celebrity-style host, an avatar. OpenBridge will draft the whole character from your prompt for you to review and accept.</div>'+
+      '<label>Character idea (prompt)</label><textarea id="imPrompt" rows="3" placeholder="e.g. A wise Nepali mountain guide named Ramesh who gives trekking tips, tells stories about the Himalayas, and recommends hidden trails. Warm, humble, talks like a friend. He knows the Annapurna circuit inside out."></textarea>'+
+      '<label>How will this character be used? (optional)</label><input id="imHint" placeholder="e.g. tourism hotline assistant, product promoter, virtual celebrity">'+
+      '<div class="flex" style="margin-top:10px">'+
+        '<button class="btn sm success" onclick="runImagine()" id="imGenBtn">Generate character</button> '+
+        '<button class="btn sm" onclick="toggleImag()">Close</button>'+
+      '</div>'+
+      '<div id="imResults"></div>'+
+    '</div>'+
 
     '<div id="autogenPanel" class="autogen hidden">'+
       '<div class="autogen-tip">Paste your public links (website, wiki, Instagram, Facebook, …). OpenBridge scrapes them, builds a verified knowledge base, and drafts the whole character for you to review.</div>'+
@@ -398,6 +410,95 @@ function toggleAutogen(){
   p.classList.toggle('hidden');
   if(!p.classList.contains('hidden')&&$('agLinks'))$('agLinks').focus();
 }
+
+// ── imagine (create character from a prompt) ───────────
+let imDraft=null;
+function toggleImag(){
+  const p=$('imagPanel');
+  if(!p)return;
+  p.classList.toggle('hidden');
+  if(!p.classList.contains('hidden')&&$('imPrompt'))$('imPrompt').focus();
+}
+function imShow(msg, pct){
+  const r=$('imResults');if(!r)return;
+  const bar=pct==null?'<div class="ag-fill indet"></div>':'<div class="ag-fill" style="width:'+pct+'%"></div>';
+  r.innerHTML='<div class="ag-progress"><div class="ag-bar">'+bar+'</div>'+
+    '<div class="ag-status"><span class="spin"></span><span>'+esc(msg)+'</span>'+(pct==null?'':'<span class="pct">'+pct+'%</span>')+'</div></div>';
+}
+async function runImagine(){
+  const prompt=$('imPrompt').value.trim();
+  if(!prompt){toast('Describe the character you imagine first',true);return}
+  const btn=$('imGenBtn');btn.disabled=true;
+  const stages=[
+    ['Reading your idea…',8],
+    ['Imagining the persona…',34],
+    ['Writing personality…',55],
+    ['Building knowledge base…',74],
+    ['Creating example chats…',88],
+    ['Finalizing profile…',95],
+  ];
+  let si=0;
+  const anim=setInterval(()=>{if(si<stages.length){const [m,p]=stages[si++];imShow(m,p)}},5000);
+  imShow('Starting…',0);
+  try{
+    const d=await api('/autogen/imagine',{method:'POST',body:JSON.stringify({prompt,hint:$('imHint').value.trim()})});
+    clearInterval(anim);
+    imDraft=d.draft||{};
+    const g=imDraft;
+    const hasExamples=Array.isArray(g.example_messages)&&g.example_messages.length;
+    const socials=Array.isArray(g.social_links)&&g.social_links.length?'<tr><td>Social links</td><td>'+g.social_links.map(s=>esc(s.label||s.type||s.url||'')).join(', ')+'</td></tr>':'';
+    $('imResults').innerHTML=
+      '<div class="imag-card">'+
+        '<div class="imag-card-head"><div class="imag-avatar">'+esc((g.name||'?').charAt(0).toUpperCase())+'</div>'+
+        '<div><strong>'+esc(g.name||'')+'</strong><div class="imag-tag">'+esc(g.tagline||'')+'</div></div></div>'+
+        '<table class="imag-table">'+
+        (g.greeting?'<tr><td>Greeting</td><td>'+esc(g.greeting)+'</td></tr>':'')+
+        (g.bio?'<tr><td>Bio</td><td>'+esc(g.bio)+'</td></tr>':'')+
+        (g.personality?'<tr><td>Personality</td><td>'+esc(g.personality)+'</td></tr>':'')+
+        (g.reply_style?'<tr><td>Reply style</td><td>'+esc(g.reply_style)+'</td></tr>':'')+
+        (g.extra_rules?'<tr><td>Extra rules</td><td>'+esc(g.extra_rules)+'</td></tr>':'')+
+        ((g.languages||[]).length?'<tr><td>Languages</td><td>'+esc(g.languages.join(', '))+'</td></tr>':'')+
+        ((g.tags||[]).length?'<tr><td>Tags</td><td>'+esc(g.tags.join(', '))+'</td></tr>':'')+
+        (g.knowledge_base?'<tr><td>Knowledge base</td><td>'+esc(g.knowledge_base)+'</td></tr>':'')+
+        (hasExamples?'<tr><td>Example chats</td><td>'+g.example_messages.slice(0,4).map(m=>'<div class="imag-ex">'+esc((m.role||'user')+': '+m.content)+'</div>').join('')+'</td></tr>':'')+
+        socials+
+        '</table>'+
+        '<div class="imag-actions">'+
+          '<button class="btn sm success" onclick="acceptImag()">✓ Accept & fill form</button> '+
+          '<button class="btn sm" onclick="regenImag()">↻ Regenerate</button>'+
+        '</div>'+
+      '</div>';
+    toast('Character drafted — review below');
+    $('imResults').scrollIntoView({behavior:'smooth',block:'nearest'});
+  }catch(e){clearInterval(anim);$('imResults').innerHTML='<div class="pg-error">'+esc(e.message)+'</div>';toast(e.message,true)}
+  btn.disabled=false;
+}
+function acceptImag(){
+  if(!imDraft)return;
+  const g=imDraft;
+  applyCharacterDraft(g);
+  toast('Accepted — review fields above, tweak anything, then Save');
+  const p=$('imagPanel');if(p)p.classList.add('hidden');
+  const cName=$('cName');if(cName)cName.focus();
+}
+function regenImag(){imDraft=null;$('imGenBtn').disabled=false;runImagine()}
+// shared: fill the character form from a draft (imagine or autogen)
+function applyCharacterDraft(g){
+  $('cName').value=g.name||'';$('cSlug').value='';
+  $('cTagline').value=g.tagline||'';$('cGreeting').value=g.greeting||'';
+  $('cBio').value=g.bio||'';$('cPersonality').value=g.personality||'';
+  $('cReplyStyle').value=g.reply_style||'';$('cExtraRules').value=g.extra_rules||'';
+  $('cKnowledge').value=g.knowledge_base||'';
+  $('cLanguages').value=(g.languages||['English']).join(', ');
+  $('cTags').value=(g.tags||[]).join(', ');
+  $('cExamples').value=(g.example_messages||[]).map(m=>(m.role||'user')+': '+m.content).join('\n');
+  const verified=document.querySelector('#cVerified');if(verified)verified.checked=true;
+  const act=document.querySelector('#cActive');if(act)act.checked=true;
+  if(Array.isArray(g.social_links)&&g.social_links.length){
+    socialLinksDraft=g.social_links.map(s=>({type:s.type||'website',label:s.label||s.type||'',url:s.url||''}));
+    renderSocialRows();
+  }
+}
 async function runScrape(){
   const links=$('agLinks').value.split('\n').map(s=>s.trim()).filter(Boolean);
   if(!links.length){toast('Paste at least one link',true);return}
@@ -439,15 +540,7 @@ async function runAutogen(){
     const d=await api('/autogen/generate',{method:'POST',body:JSON.stringify({sources:usable,hint:$('agHint').value.trim()})});
     clearInterval(anim);
     const g=d.draft||{};
-    $('cName').value=g.name||'';$('cSlug').value='';
-    $('cTagline').value=g.tagline||'';$('cGreeting').value=g.greeting||'';
-    $('cBio').value=g.bio||'';$('cPersonality').value=g.personality||'';
-    $('cReplyStyle').value=g.reply_style||'';$('cExtraRules').value=g.extra_rules||'';
-    $('cKnowledge').value=g.knowledge_base||'';
-    $('cLanguages').value=(g.languages||['English']).join(', ');
-    $('cTags').value=(g.tags||[]).join(', ');
-    $('cExamples').value=(g.example_messages||[]).map(m=>(m.role||'user')+': '+m.content).join('\n');
-    const verified=document.querySelector('#cVerified');if(verified)verified.checked=true;
+    applyCharacterDraft(g);
     agShow('Done',100);
     $('agResults').innerHTML='<div class="ag-progress"><div class="ag-bar"><div class="ag-fill" style="width:100%"></div></div>'+
       '<div class="src-tip" style="margin-top:10px;border-color:#34c75944;color:var(--success)">✓ Character drafted from '+(d.sources||[]).length+' source(s). Review every field above, tweak anything, then Save.</div></div>';
@@ -958,7 +1051,7 @@ async function testLlmById(id){
 }
 function testNewLlm(){
   const f=llmForm();
-  testLlm({llm_base_url:f.base_url,llm_bearer:f.bearer_token||'',model:f.model||'big-pickle'});
+  testLlm({llm_base_url:f.base_url,llm_bearer:f.bearer_token||'',model:f.model||'antigravity/gemini-2.5-flash'});
 }
 
 // ── settings ────────────────────────────────────────────
@@ -969,7 +1062,7 @@ function fillSettings(s){
   $('sOpenwaBase').value=s.openwa_base_url||'';
   $('sOpenwaKey').value=s.openwa_api_key||'';
   $('sWebhookSecret').value=s.webhook_secret||'';
-  $('sModel').value=s.model||'big-pickle';
+  $('sModel').value=s.model||'antigravity/gemini-2.5-flash';
   $('sFallback').value=s.fallback_model||'auto';
   $('sMaxTokens').value=s.max_tokens||80;
   $('sHardCap').value=s.reply_hard_cap||120;
@@ -989,7 +1082,7 @@ async function saveSettings(){
     openwa_base_url:$('sOpenwaBase').value.trim()||null,
     openwa_api_key:$('sOpenwaKey').value.trim()||null,
     webhook_secret:$('sWebhookSecret').value.trim()||null,
-    model:$('sModel').value.trim()||'big-pickle',
+    model:$('sModel').value.trim()||'antigravity/gemini-2.5-flash',
     fallback_model:$('sFallback').value.trim()||'auto',
     max_tokens:parseInt($('sMaxTokens').value)||80,
     reply_hard_cap:parseInt($('sHardCap').value)||120,

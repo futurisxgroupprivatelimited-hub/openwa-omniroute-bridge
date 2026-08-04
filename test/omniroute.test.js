@@ -161,12 +161,12 @@ test('testLlmConfig: fails cleanly when the endpoint errors', async () => {
   await assert.rejects(() => testLlmConfig({ llm_base_url: 'http://llm', llm_bearer: 'k', model: 'm' }), /LLM 502/);
 });
 
-test('testLlmConfig: defaults model to big-pickle when omitted', async () => {
+test('testLlmConfig: defaults model to antigravity/gemini-2.5-flash when omitted', async () => {
   let body = null;
   globalThis.fetch = async (_url, opts) => {
     body = JSON.parse(opts.body);
     return new Response(JSON.stringify({ choices: [{ message: { content: 'OK' } }] }), { status: 200 });
   };
   await testLlmConfig({ llm_base_url: 'http://llm', llm_bearer: 'k' });
-  assert.equal(body.model, 'big-pickle');
+  assert.equal(body.model, 'antigravity/gemini-2.5-flash');
 });

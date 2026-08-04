@@ -22,6 +22,12 @@ export async function listSessions(base, apiKey) {
   return Array.isArray(parsed) ? parsed : parsed?.sessions || [];
 }
 
+export async function listChats({ base, apiKey, sessionId, limit }) {
+  const qs = new URLSearchParams({ limit: String(limit || 1000) });
+  const parsed = await jfetch(base, `/api/sessions/${encodeURIComponent(sessionId)}/chats?${qs}`, { apiKey });
+  return Array.isArray(parsed) ? parsed : parsed?.chats || [];
+}
+
 export async function fetchChatHistory({ base, apiKey, sessionId, chatId, limit }) {
   const qs = new URLSearchParams({ chatId, limit: String(limit || 40) });
   const parsed = await jfetch(base, `/api/sessions/${encodeURIComponent(sessionId)}/messages?${qs}`, { apiKey });

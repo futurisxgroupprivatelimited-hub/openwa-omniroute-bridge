@@ -63,7 +63,7 @@ async function bootstrapAdmin() {
      ON CONFLICT (key) DO NOTHING`,
     [process.env.OMNIROUTE_BASE_URL || 'http://localhost:20128',
      process.env.OMNIROUTE_BEARER || 'omniroute',
-     process.env.DEFAULT_LLM_MODEL || 'big-pickle']
+     process.env.DEFAULT_LLM_MODEL || 'antigravity/gemini-2.5-flash']
   );
   console.log(`[migrate] bootstrap admin created: ${email}`);
 }

@@ -15,7 +15,7 @@ import adminRoutes from './routes/admin.js';
 import playgroundRoutes from './routes/playground.js';
 import notificationRoutes from './routes/notifications.js';
 import autogenRoutes from './routes/autogen.js';
-import { discoverSessions, logLine, registerWebhooksForSession } from './services/bridge.js';
+import { discoverSessions, logLine, registerWebhooksForSession, syncSessionHistory } from './services/bridge.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const app = express();
@@ -78,3 +78,27 @@ async function pollAllSessions() {
 }
 setTimeout(pollAllSessions, 3000);
 setInterval(pollAllSessions, config.sessionPollMs);
+
+// Background: reconcile chat history from OpenWA so a dropped webhook or a
+// missed delivery while the session stayed online never loses a message.
+// Runs a short window behind the session poll; syncSessionHistory is idempotent
+// (remote-id + body dedup) so overlap with webhook delivery is harmless.
+async function syncAllSessions() {
+  try {
+    const r = await query('SELECT * FROM users WHERE openwa_base_url IS NOT NULL AND openwa_api_key IS NOT NULL');
+    for (const user of r.rows) {
+      try {
+        const s = await query('SELECT * FROM wa_sessions WHERE user_id=$1 AND webhook_registered', [user.id]);
+        for (const sessionRow of s.rows) {
+          await syncSessionHistory(user, sessionRow, { reply: true });
+        }
+      } catch (e) {
+        await logLine(`[sync] ${user.email} failed: ${e.message}`);
+      }
+    }
+  } catch (e) {
+    await logLine(`[sync] error: ${e.message}`);
+  }
+}
+setTimeout(syncAllSessions, 9000);
+setInterval(syncAllSessions, 60000);

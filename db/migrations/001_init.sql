@@ -12,7 +12,7 @@ CREATE TABLE IF NOT EXISTS users (
   webhook_secret        text,
   openwa_base_url       text,
   openwa_api_key        text,
-  model                 text NOT NULL DEFAULT 'big-pickle',
+  model                 text NOT NULL DEFAULT 'antigravity/gemini-2.5-flash',
   fallback_model        text NOT NULL DEFAULT 'auto',
   memory_limit          int NOT NULL DEFAULT 40,
   max_tokens            int NOT NULL DEFAULT 80,

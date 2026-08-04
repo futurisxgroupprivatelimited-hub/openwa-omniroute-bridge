@@ -41,21 +41,6 @@
     <div class="nav-item admin-only hidden" data-view="admin"><span>🛡</span><span>Admin</span></div>
     <div class="nav-item" data-view="settings"><span>⚙</span><span>Settings</span></div>
 
-    <div class="bell-wrap">
-      <div class="nav-item" onclick="toggleBell()"><span>🔔</span><span>Notifications</span><span class="bell-badge hidden" id="bellBadge">0</span></div>
-      <div class="bell-drop hidden" id="bellDrop">
-        <div class="bell-head">
-          <strong>Notifications</strong>
-          <div class="bell-actions">
-            <button class="btn sm" onclick="markAllRead()">Read all</button>
-            <button class="btn sm danger" onclick="clearAllNotifications()">Clear</button>
-          </div>
-        </div>
-        <div class="bell-list" id="bellList"><div class="empty">Loading...</div></div>
-        <div class="bell-foot"><button class="btn sm" onclick="loadBell()">↻ Refresh</button></div>
-      </div>
-    </div>
-
     <div class="user">
       <strong id="meName">—</strong>
       <div class="email" id="meEmail">—</div>
@@ -65,6 +50,24 @@
   </div>
 
   <div class="main">
+    <!-- TOP BAR -->
+    <div class="topbar">
+      <div class="bell-wrap">
+        <button class="bell-btn" onclick="toggleBell()"><span>🔔</span><span class="bell-badge hidden" id="bellBadge">0</span></button>
+        <div class="bell-drop hidden" id="bellDrop">
+          <div class="bell-head">
+            <strong>Notifications</strong>
+            <div class="bell-actions">
+              <button class="btn sm" onclick="markAllRead()">Read all</button>
+              <button class="btn sm danger" onclick="clearAllNotifications()">Clear</button>
+            </div>
+          </div>
+          <div class="bell-list" id="bellList"><div class="empty">Loading...</div></div>
+          <div class="bell-foot"><button class="btn sm" onclick="loadBell()">↻ Refresh</button></div>
+        </div>
+      </div>
+    </div>
+
     <!-- OVERVIEW -->
     <div id="view-overview">
       <div class="page-title">Overview <span class="sub" id="ovSub"></span></div>
@@ -214,7 +217,7 @@
             <h3>Add / edit endpoint <span class="hint">any OpenAI-compatible endpoint</span></h3>
             <label>Quick preset</label>
             <div class="seg llm-presets" id="llmPresets">
-              <button data-b="http://host.docker.internal:20128" data-m="big-pickle" class="active">OmniRoute</button>
+              <button data-b="http://host.docker.internal:20128" data-m="antigravity/gemini-2.5-flash" class="active">OmniRoute</button>
               <button data-b="https://api.openai.com/v1" data-m="gpt-4o-mini">OpenAI</button>
               <button data-b="http://localhost:11434/v1" data-m="llama3.1">Ollama</button>
               <button data-b="https://api.groq.com/openai/v1" data-m="llama-3.1-8b-instant">Groq</button>
@@ -222,7 +225,7 @@
             <label>Name</label><input id="adLlmName" placeholder="Production gateway">
             <label>Base URL</label><input id="adLlmBase" placeholder="http://host.docker.internal:20128">
             <label>API / bearer token <span class="hint">leave empty for local endpoints</span></label><input id="adLlmBearer" type="password" placeholder="sk-… or empty">
-            <label>Model</label><input id="adLlmModel" placeholder="big-pickle">
+            <label>Model</label><input id="adLlmModel" placeholder="antigravity/gemini-2.5-flash">
             <div class="switch-row"><span>Activate now</span><label class="switch"><input id="adLlmActive" type="checkbox"><span class="slider"></span></label></div>
             <div class="llm-actions">
               <button class="btn success" onclick="saveLlm()">Save endpoint</button>
@@ -247,7 +250,7 @@
         </div>
         <div class="card">
           <h3>LLM</h3>
-          <label>Model</label><input id="sModel" placeholder="big-pickle">
+          <label>Model</label><input id="sModel" placeholder="antigravity/gemini-2.5-flash">
           <label>Fallback Model</label><input id="sFallback" placeholder="auto">
           <label>Max Tokens</label><input id="sMaxTokens" type="number">
           <label>Reply Hard Cap (chars)</label><input id="sHardCap" type="number">

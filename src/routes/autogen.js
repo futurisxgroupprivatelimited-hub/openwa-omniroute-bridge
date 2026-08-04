@@ -18,6 +18,50 @@ router.post('/scrape', async (req, res) => {
   }
 });
 
+// Step 1b: create an "imagined" character from a text prompt (no links needed)
+router.post('/imagine', async (req, res) => {
+  try {
+    const prompt = String(req.body?.prompt || '').trim();
+    if (!prompt) return res.status(400).json({ error: 'describe the character you want to create' });
+
+    const hint = String(req.body?.hint || '').trim();
+    const sys = [
+      'You are a character designer for a WhatsApp AI chat persona.',
+      'The character will chat like a real human over WhatsApp (casual, short, natural messages).',
+      'Use ONLY the imagination/prompt provided. Invent a compelling, coherent, original character from it.',
+    ].join('\n');
+    const usr = [
+      'CHARACTER IDEA:',
+      prompt,
+      '',
+      hint ? `EXTRA NOTE: ${hint}` : '',
+      '',
+      'Return STRICT JSON (no markdown) with exactly this shape:',
+      '{',
+      '  "name": "character display name",',
+      '  "tagline": "one short line",',
+      '  "greeting": "first message a new chat receives, casual WhatsApp style",',
+      '  "bio": "2-4 sentences",',
+      '  "personality": "how they behave, warm + professional",',
+      '  "reply_style": "short, natural WhatsApp style, never robotic",',
+      '  "extra_rules": "additional behavioral rules, e.g. never reveal being AI, redirect sales questions",',
+      '  "languages": ["English"],',
+      '  "tags": ["category", "category"],',
+      '  "knowledge_base": "a compact fact sheet (200-500 words) about this character: their world, background, expertise, what they know and how they can help",',
+      '  "example_messages": [{"role":"user","content":"..."},{"role":"assistant","content":"..."}]',
+      '}',
+    ].join('\n');
+
+    const msgs = [{ role: 'system', content: sys }, { role: 'user', content: usr }];
+    const draft = await completeJson(req.user, msgs);
+    const name = String(draft.name || '').trim();
+    if (!name) throw new Error('LLM returned no character name');
+    res.json({ draft });
+  } catch (e) {
+    res.status(400).json({ error: e.message });
+  }
+});
+
 // Step 2: generate a complete character profile from scraped text
 router.post('/generate', async (req, res) => {
   try {

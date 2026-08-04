@@ -138,7 +138,7 @@ router.post('/', async (req, res) => {
     res.json({
       reply: replyText,
       media: media.slice(0, 2).map(driveDirectUrl),
-      model: req.user.model || gw.llm_default_model || 'big-pickle',
+      model: req.user.model || gw.llm_default_model || 'antigravity/gemini-2.5-flash',
       latencyMs: Date.now() - started,
       typingMs,
       typingPhases: phases,

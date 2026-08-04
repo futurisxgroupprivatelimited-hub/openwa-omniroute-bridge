@@ -9,7 +9,7 @@ function seed() {
     id: null,
     llm_base_url: (process.env.OMNIROUTE_BASE_URL || 'http://localhost:20128').replace(/\/$/, ''),
     llm_bearer: process.env.OMNIROUTE_BEARER || 'omniroute',
-    llm_default_model: process.env.DEFAULT_LLM_MODEL || 'big-pickle',
+    llm_default_model: process.env.DEFAULT_LLM_MODEL || 'antigravity/gemini-2.5-flash',
   };
 }
 
