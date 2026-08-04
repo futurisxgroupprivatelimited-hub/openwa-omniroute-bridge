@@ -12,6 +12,7 @@ export function publicUser(u) {
     email: u.email,
     name: u.name,
     plan: u.plan,
+    role: u.role || 'user',
     api_key: u.api_key,
     webhook_token: u.webhook_token,
     webhook_secret: u.webhook_secret,
@@ -54,4 +55,12 @@ export async function requireUser(req, res, next) {
   } catch (e) {
     res.status(401).json({ error: 'unauthorized' });
   }
+}
+
+export async function requireAdmin(req, res, next) {
+  if ((req.user?.role || 'user') !== 'admin') {
+    res.status(403).json({ error: 'admin only' });
+    return;
+  }
+  next();
 }

@@ -26,6 +26,7 @@
     <button class="btn primary" type="submit" style="width:100%;margin-top:14px" id="authBtn">Login</button>
   </form>
   <div class="auth-hint" id="authHint">Login to your tenant dashboard. New here? Register a free account — you get a unique webhook URL to connect your OpenWA.</div>
+  <div class="auth-hint" id="adminCreds" style="display:none"></div>
 </div>
 
 <!-- APP -->
@@ -36,10 +37,22 @@
     <div class="nav-item" data-view="characters"><span>◈</span><span>Characters</span></div>
     <div class="nav-item" data-view="sessions"><span>✉</span><span>Sessions</span></div>
     <div class="nav-item" data-view="webhooks"><span>↗</span><span>Webhooks</span></div>
+    <div class="nav-item" data-view="stats"><span>▤</span><span>Stats</span></div>
+    <div class="nav-item admin-only hidden" data-view="admin"><span>🛡</span><span>Admin</span></div>
     <div class="nav-item" data-view="settings"><span>⚙</span><span>Settings</span></div>
+
+    <div class="bell-wrap">
+      <div class="nav-item" onclick="toggleBell()"><span>🔔</span><span>Notifications</span><span class="bell-badge hidden" id="bellBadge">0</span></div>
+      <div class="bell-drop hidden" id="bellDrop">
+        <div class="bell-head"><strong>Notifications</strong><button class="btn sm" onclick="markAllRead()">Mark all read</button></div>
+        <div class="bell-list" id="bellList"><div class="empty">Loading...</div></div>
+      </div>
+    </div>
+
     <div class="user">
       <strong id="meName">—</strong>
       <div class="email" id="meEmail">—</div>
+      <div class="role-badge" id="meRole"></div>
       <div style="margin-top:10px"><button class="btn sm" onclick="logout()">Logout</button></div>
     </div>
   </div>
@@ -52,7 +65,7 @@
         <div class="card metric"><h3>Messages</h3><div class="big" id="mMsgs">0</div><div class="sub"><span id="mIn">0</span> in · <span id="mOut">0</span> out</div></div>
         <div class="card metric"><h3>Characters</h3><div class="big" id="mChars">0</div><div class="sub">personas</div></div>
         <div class="card metric"><h3>Sessions</h3><div class="big" id="mSess">0</div><div class="sub">linked WhatsApp</div></div>
-        <div class="card metric"><h3>LLM calls</h3><div class="big" id="mLlm">0</div><div class="sub">replies generated</div></div>
+        <div class="card metric"><h3>LLM replies</h3><div class="big" id="mLlm">0</div><div class="sub">generated replies</div></div>
       </div>
       <div class="card"><h3>Your webhook URL</h3>
         <div class="wb-url">
@@ -69,7 +82,7 @@
 
     <!-- CHARACTERS -->
     <div id="view-characters" class="hidden">
-      <div class="page-title">Characters <span class="sub">Create unlimited personas; each can get its own webhook URL</span>
+      <div class="page-title">Characters <span class="sub">Create unlimited personas; each can get its own webhook URL + a playground to test replies</span>
         <button class="btn primary" onclick="newCharacter()">+ New Character</button></div>
       <div id="charList"></div>
     </div>
@@ -79,7 +92,7 @@
       <div class="page-title">Sessions <span class="sub">Connect each of your OpenWA sessions to a character</span>
         <button class="btn primary" onclick="loadSessions(true)">Refresh from OpenWA</button></div>
       <div class="card">
-        <h3>Discovered sessions</h3>
+        <h3>Discovered sessions <span class="hint">disconnects here trigger notifications + auto catch-up on reconnect</span></h3>
         <table><thead><tr><th>Name</th><th>Status</th><th>Phone</th><th>Character</th><th>Webhooks</th></tr></thead>
         <tbody id="sessionRows"><tr><td colspan="5"><div class="empty">Loading...</div></td></tr></tbody></table>
       </div>
@@ -97,6 +110,118 @@
         <h3>Per-character webhooks</h3>
         <table><thead><tr><th>Character</th><th>URL</th><th>Copy</th></tr></thead><tbody id="charWebhookRows"></tbody></table>
         <div style="font-size:11px;color:var(--muted);margin-top:8px">Create a webhook in OpenWA per character — messages on that URL are answered by that character only.</div>
+      </div>
+    </div>
+
+    <!-- STATS -->
+    <div id="view-stats" class="hidden">
+      <div class="page-title">Stats <span class="sub">Message analytics per session and character</span></div>
+      <div class="card filters">
+        <span class="f-label">Period</span>
+        <div class="seg" id="stRange">
+          <button data-r="24h">24h</button><button data-r="7d">7d</button><button data-r="30d" class="active">30d</button><button data-r="90d">90d</button><button data-r="all">All</button>
+        </div>
+        <span class="f-label">Session</span>
+        <select id="stSession" onchange="loadUserStats(true)"><option value="">All</option></select>
+        <span class="f-label">Character</span>
+        <select id="stCharacter" onchange="loadUserStats(true)"><option value="">All</option></select>
+      </div>
+      <div class="grid4">
+        <div class="card metric"><h3>Messages</h3><div class="big" id="stMsgs">0</div><div class="sub">in selected period</div></div>
+        <div class="card metric"><h3>Inbound</h3><div class="big" id="stIn">0</div><div class="sub">received</div></div>
+        <div class="card metric"><h3>Outbound</h3><div class="big" id="stOut">0</div><div class="sub">replied</div></div>
+        <div class="card metric"><h3>Reply rate</h3><div class="big" id="stRate">—</div><div class="sub">out / in</div></div>
+      </div>
+      <div class="card"><h3>Per session (per number)</h3><table><thead><tr><th>Session</th><th>Status</th><th>Inbound</th><th>Outbound</th><th>Reply rate</th><th>Last activity</th></tr></thead><tbody id="stSessionRows"></tbody></table></div>
+      <div class="card"><h3>Per character</h3><table><thead><tr><th>Character</th><th>Inbound</th><th>Outbound</th><th>Reply rate</th><th>Last activity</th></tr></thead><tbody id="stCharRows"></tbody></table></div>
+      <div class="card">
+        <h3>Messages</h3>
+        <div class="filters">
+          <span class="f-label">Direction</span>
+          <select id="stDir" onchange="loadUserMsgs(true)"><option value="">All</option><option value="incoming">Inbound</option><option value="outgoing">Outbound</option></select>
+          <span class="f-label">Chat / number</span>
+          <input id="stChat" placeholder="e.g. 97798…@c.us" style="max-width:220px">
+          <button class="btn sm" onclick="loadUserMsgs(true)">Apply</button>
+        </div>
+        <table><thead><tr><th>Time</th><th>Dir</th><th>Chat</th><th>Character</th><th>Message</th></tr></thead><tbody id="stMsgRows"><tr><td colspan="5"><div class="empty">Loading...</div></td></tr></tbody></table>
+        <div class="pager" id="stMsgPager"></div>
+      </div>
+    </div>
+
+    <!-- ADMIN -->
+    <div id="view-admin" class="hidden">
+      <div class="page-title">Admin Panel <span class="sub">Platform health, users, and LLM gateway</span></div>
+
+      <div class="tabs">
+        <button class="active" data-atab="overview" onclick="adminTab('overview')">Overview</button>
+        <button data-atab="users" onclick="adminTab('users')">Users</button>
+        <button data-atab="llm" onclick="adminTab('llm')">LLM Gateway</button>
+      </div>
+
+      <div id="adminTab-overview">
+        <div class="card filters">
+          <span class="f-label">Period</span>
+          <div class="seg" id="adRange">
+            <button data-r="24h">24h</button><button data-r="7d">7d</button><button data-r="30d" class="active">30d</button><button data-r="90d">90d</button><button data-r="all">All</button>
+          </div>
+          <span class="f-label">User</span>
+          <input id="adUser" placeholder="user id (optional)" style="max-width:240px">
+          <button class="btn sm" onclick="loadAdminStats(true)">Apply</button>
+        </div>
+        <div class="grid4">
+          <div class="card metric"><h3>Users</h3><div class="big" id="adUsers">0</div><div class="sub">platform total</div></div>
+          <div class="card metric"><h3>Sessions</h3><div class="big" id="adSess">0</div><div class="sub">linked numbers</div></div>
+          <div class="card metric"><h3>Messages</h3><div class="big" id="adMsgs">0</div><div class="sub"><span id="adIn">0</span> in · <span id="adOut">0</span> out</div></div>
+          <div class="card metric"><h3>Active users</h3><div class="big" id="adActive">0</div><div class="sub">in period</div></div>
+        </div>
+
+        <div class="card"><h3>Per user</h3><table><thead><tr><th>User</th><th>Plan</th><th>Inbound</th><th>Outbound</th><th>Sessions used</th><th>Last activity</th></tr></thead><tbody id="adUserRows"></tbody></table><div class="pager" id="adUserPager"></div></div>
+        <div class="grid2">
+          <div class="card"><h3>Per session (per number)</h3><table><thead><tr><th>Session</th><th>User</th><th>In</th><th>Out</th><th>Rate</th></tr></thead><tbody id="adSessionRows"></tbody></table><div class="pager" id="adSessionPager"></div></div>
+          <div class="card"><h3>Per character</h3><table><thead><tr><th>Character</th><th>User</th><th>In</th><th>Out</th><th>Rate</th></tr></thead><tbody id="adCharRows"></tbody></table><div class="pager" id="adCharPager"></div></div>
+        </div>
+      </div>
+
+      <div id="adminTab-users" class="hidden">
+        <div class="card filters">
+          <input id="adSearch" placeholder="Search email / name" style="max-width:280px">
+          <button class="btn sm" onclick="loadAdminUsers(true)">Search</button>
+        </div>
+        <div class="card"><table><thead><tr><th>Email</th><th>Name</th><th>Plan</th><th>Role</th><th>Chars</th><th>Sessions</th><th>In</th><th>Out</th><th>Last activity</th><th></th></tr></thead><tbody id="adUserList"></tbody></table><div class="pager" id="adUserListPager"></div></div>
+        <div class="card" id="adUserDetail" style="display:none"></div>
+      </div>
+
+      <div id="adminTab-llm" class="hidden">
+        <div class="grid2">
+          <div class="card">
+            <h3>Current gateway</h3>
+            <div class="kv"><span>Status</span><span><span class="badge" id="llmStatusBadge">—</span></span></div>
+            <div class="kv"><span>Base URL</span><code id="llmBase">—</code></div>
+            <div class="kv"><span>Bearer token</span><code id="llmBearer">—</code></div>
+            <div class="kv"><span>Default model</span><code id="llmModel">—</code></div>
+            <div class="llm-actions">
+              <button class="btn sm" onclick="testCurrentLlm()">Test current config</button>
+            </div>
+            <div class="test-result" id="llmTestResult"></div>
+          </div>
+          <div class="card">
+            <h3>Set LLM gateway <span class="hint">any OpenAI-compatible endpoint</span></h3>
+            <label>Quick preset</label>
+            <div class="seg llm-presets" id="llmPresets">
+              <button data-b="http://host.docker.internal:20128" data-m="big-pickle" class="active">OmniRoute</button>
+              <button data-b="https://api.openai.com/v1" data-m="gpt-4o-mini">OpenAI</button>
+              <button data-b="http://localhost:11434/v1" data-m="llama3.1">Ollama</button>
+              <button data-b="https://api.groq.com/openai/v1" data-m="llama-3.1-8b-instant">Groq</button>
+            </div>
+            <label>Base URL</label><input id="adLlmBase" placeholder="http://host.docker.internal:20128">
+            <label>API / bearer token <span class="hint">leave empty for local endpoints</span></label><input id="adLlmBearer" type="password" placeholder="sk-… or empty">
+            <label>Default model</label><input id="adLlmModel" placeholder="big-pickle">
+            <div class="llm-actions">
+              <button class="btn success" onclick="saveLlm()">Save gateway</button>
+              <button class="btn sm" onclick="testNewLlm()">Test new config</button>
+            </div>
+          </div>
+        </div>
       </div>
     </div>
 
@@ -139,6 +264,56 @@
 </div>
 
 <div class="toast" id="toast"></div>
+
+<!-- PLAYGROUND -->
+<div id="pgOverlay" class="overlay hidden">
+  <div class="pg-modal">
+    <div class="pg-head">
+      <div class="pg-avatar" id="pgAvatar">?</div>
+      <div class="pg-id">
+        <strong id="pgName">Character</strong>
+        <div class="pg-meta"><span class="dot-online"></span><span id="pgMeta">ready to chat</span></div>
+      </div>
+      <span class="spacer"></span>
+      <button class="pg-close" onclick="closePlayground()" aria-label="Close">
+        <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M6 6l12 12M18 6L6 18"/></svg>
+      </button>
+    </div>
+    <div class="pg-body">
+      <div class="pg-chat" id="pgOut">
+        <div class="empty">Send a message to see how this character replies.</div>
+      </div>
+      <div class="pg-side">
+        <details class="pg-details" open>
+          <summary>Conversation context</summary>
+          <textarea id="pgContext" rows="6" placeholder="user: hey&#10;assistant: hi how are you?"></textarea>
+          <div class="pg-tip">Optional memory — one prior message per line, `user:` / `assistant:` prefixes.</div>
+        </details>
+        <div class="pg-hist">
+          <div class="pg-hist-head">
+            <span>History</span>
+            <span id="pgCount" class="pg-count">0 messages</span>
+            <button class="btn sm pg-clear" onclick="clearPgHistory($('pgCharId').value)">Clear</button>
+          </div>
+          <div class="pg-live-head">WhatsApp conversations</div>
+          <div id="pgLiveList"><div class="pg-tip">Loading…</div></div>
+        </div>
+        <div class="pg-chips" id="pgChips"></div>
+      </div>
+    </div>
+    <div class="pg-composer">
+      <div id="pgStatus" class="pg-status"></div>
+      <div class="pg-composer-row">
+        <textarea id="pgMsg" rows="1" placeholder="Message…" onkeydown="pgKey(event)"></textarea>
+        <button class="pg-send" onclick="sendPlayground()" aria-label="Send">
+          <svg viewBox="0 0 24 24" width="20" height="20" fill="currentColor"><path d="M3 20.5 21 12 3 3.5 3 9.5l12 2.5-12 2.5z"/></svg>
+        </button>
+      </div>
+    </div>
+    <input type="hidden" id="pgCharId">
+  </div>
+</div>
+
 <script src="/app.js"></script>
 </body>
 </html>

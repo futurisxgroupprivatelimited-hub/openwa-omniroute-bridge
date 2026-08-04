@@ -43,6 +43,12 @@ export async function sendText({ base, apiKey, sessionId, chatId, text }) {
   });
 }
 
+export async function sendMedia({ base, apiKey, sessionId, chatId, file, caption }) {
+  await jfetch(base, `/api/sessions/${encodeURIComponent(sessionId)}/messages/send-media`, {
+    method: 'POST', apiKey, body: { chatId, file, caption },
+  });
+}
+
 export async function listSessionWebhooks(base, apiKey, sessionId) {
   const parsed = await jfetch(base, `/api/sessions/${encodeURIComponent(sessionId)}/webhooks`, { apiKey });
   return Array.isArray(parsed) ? parsed : parsed?.webhooks || [];

@@ -11,6 +11,10 @@ import sessionRoutes from './routes/sessions.js';
 import settingsRoutes from './routes/settings.js';
 import webhookRoutes from './routes/webhooks.js';
 import dashboardRoutes from './routes/dashboard.js';
+import adminRoutes from './routes/admin.js';
+import playgroundRoutes from './routes/playground.js';
+import notificationRoutes from './routes/notifications.js';
+import autogenRoutes from './routes/autogen.js';
 import { discoverSessions, logLine, registerWebhooksForSession } from './services/bridge.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -26,6 +30,10 @@ app.use('/api/sessions', sessionRoutes);
 app.use('/api/settings', settingsRoutes);
 app.use('/api/webhooks', webhookRoutes);
 app.use('/api/dashboard', dashboardRoutes);
+app.use('/api/admin', adminRoutes);
+app.use('/api/playground', playgroundRoutes);
+app.use('/api/notifications', notificationRoutes);
+app.use('/api/autogen', autogenRoutes);
 
 app.use(express.static(path.join(__dirname, '..', 'public')));
 

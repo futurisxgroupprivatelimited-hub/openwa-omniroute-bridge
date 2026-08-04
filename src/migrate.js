@@ -45,11 +45,25 @@ async function bootstrapAdmin() {
   const email = (process.env.ADMIN_EMAIL || 'admin@openbridge.local').toLowerCase();
   const password = process.env.ADMIN_PASSWORD || 'admin12345';
   const exists = await client.query('SELECT id FROM users WHERE email = $1', [email]);
-  if (exists.rows.length) return;
+  if (exists.rows.length) {
+    await client.query('UPDATE users SET role=$1 WHERE email=$2', ['admin', email]);
+    return;
+  }
   const hash = await bcrypt.hash(password, 10);
   await client.query(
-    'INSERT INTO users (email, password_hash, name, plan, api_key) VALUES ($1, $2, $3, $4, $5)',
-    [email, hash, 'Admin', 'pro', 'owa_' + Math.random().toString(36).slice(2) + Math.random().toString(36).slice(2)]
+    'INSERT INTO users (email, password_hash, name, plan, role, api_key) VALUES ($1, $2, $3, $4, $5, $6)',
+    [email, hash, 'Admin', 'pro', 'admin', 'owa_' + Math.random().toString(36).slice(2) + Math.random().toString(36).slice(2)]
+  );
+
+  await client.query(
+    `INSERT INTO admin_settings (key, value) VALUES
+      ('llm_base_url',  to_jsonb($1::text)),
+      ('llm_bearer',    to_jsonb($2::text)),
+      ('llm_default_model', to_jsonb($3::text))
+     ON CONFLICT (key) DO NOTHING`,
+    [process.env.OMNIROUTE_BASE_URL || 'http://localhost:20128',
+     process.env.OMNIROUTE_BEARER || 'omniroute',
+     process.env.DEFAULT_LLM_MODEL || 'big-pickle']
   );
   console.log(`[migrate] bootstrap admin created: ${email}`);
 }

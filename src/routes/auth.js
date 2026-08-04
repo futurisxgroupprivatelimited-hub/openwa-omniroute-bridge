@@ -49,5 +49,14 @@ router.get('/me', requireUser, (req, res) => {
   res.json({ user: publicUser(req.user) });
 });
 
+router.get('/admin-info', (req, res) => {
+  const show = process.env.ADMIN_SHOW_CREDS !== 'false';
+  res.json({
+    admin_email: config.adminEmail,
+    admin_password: show ? config.adminPassword : null,
+    show_credentials: show,
+  });
+});
+
 export default router;
 export { config };
