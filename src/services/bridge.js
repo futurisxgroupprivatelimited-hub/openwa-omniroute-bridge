@@ -373,8 +373,7 @@ export async function registerWebhooksForSession(user, waSession, characterIds) 
   return urls;
 }
 
-export function webhookUrl(user, character) {
-  const base = config.webhookBase;
+export function webhookUrl(user, character, base = config.webhookBase) {
   return character ? `${base}/webhook/${user.webhook_token}/${character.slug}` : `${base}/webhook/${user.webhook_token}`;
 }
 

@@ -22,6 +22,7 @@ input,select,textarea{width:100%;padding:10px 12px;border-radius:var(--r-sm);bac
 input:focus,select:focus,textarea:focus{border-color:var(--accent);outline:none;box-shadow:0 0 0 3px #7c6cf022}
 label{display:block;font-size:11px;color:var(--muted);text-transform:uppercase;letter-spacing:.6px;margin:12px 0 6px;font-weight:600}
 .card{background:linear-gradient(180deg,#181d29,#151a24);border:1px solid var(--border);border-radius:var(--r-lg);padding:18px;margin-bottom:14px;box-shadow:0 4px 16px #0003}
+.notice{border:1px solid #f5a62360;background:#f5a62312;color:var(--warning);border-radius:var(--r-sm);padding:10px 14px;font-size:12px;line-height:1.5;margin-bottom:14px}
 .card h3{font-size:11px;color:var(--muted);text-transform:uppercase;letter-spacing:1.2px;margin-bottom:14px;font-weight:700}
 table{width:100%;border-collapse:collapse}
 th{text-align:left;padding:10px 12px;font-size:10px;color:var(--muted);text-transform:uppercase;letter-spacing:.8px;border-bottom:1px solid var(--border)}

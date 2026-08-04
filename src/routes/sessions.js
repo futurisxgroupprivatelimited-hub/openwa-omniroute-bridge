@@ -8,6 +8,9 @@ router.use(requireUser);
 
 router.get('/', async (req, res) => {
   try {
+    if (!req.user.openwa_base_url || !req.user.openwa_api_key) {
+      return res.status(400).json({ error: 'OpenWA is not connected — add your base URL and API key in Settings first', configMissing: true });
+    }
     const discovered = await discoverSessions(req.user);
     res.json({ sessions: discovered });
   } catch (e) {

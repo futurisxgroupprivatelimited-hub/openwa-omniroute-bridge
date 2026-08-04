@@ -27,7 +27,7 @@ async function api(path, opts={}){
   const res = await fetch(API+path, {...opts, headers});
   const data = await res.json().catch(()=>({}));
   if(res.status===401 && token){logout();throw new Error('unauthorized')}
-  if(!res.ok) throw new Error(data.error||res.status);
+  if(!res.ok){const err=new Error(data.error||res.status);err.configMissing=!!data.configMissing;throw err}
   return data;
 }
 
@@ -670,7 +670,11 @@ async function loadSessions(manual){
   const el=$('sessionRows');
   el.innerHTML='<tr><td colspan="5"><div class="empty">'+(manual?'Refreshing...':'Loading...')+'</div></td></tr>';
   let data;
-  try{data=await api('/sessions')}catch(e){el.innerHTML=emptyRows(5,e.message+' — connect your OpenWA in Settings first');return}
+  try{data=await api('/sessions')}catch(e){
+    if(e.configMissing)el.innerHTML=emptyRows(5,e.message);
+    else el.innerHTML=emptyRows(5,e.message+' — connect your OpenWA in Settings first');
+    return;
+  }
   const list=data.sessions||[];
   if(!list.length){el.innerHTML=emptyRows(5,'No sessions found in your OpenWA');return}
   el.innerHTML=list.map(s=>{
@@ -701,6 +705,31 @@ async function registerSessWebhooks(id){
 }
 
 // ── webhooks ────────────────────────────────────────────
+function isPrivateWebhookHost(host){
+  host=(host||'').toLowerCase();
+  if(!host||host==='localhost'||host.endsWith('.localhost'))return true;
+  const h=host.replace(/^\[|\]$/g,'').split(':')[0];
+  if(/^127\./.test(h)||/^10\./.test(h)||/^192\.168\./.test(h))return true;
+  if(/^172\./.test(h)){
+    const n=parseInt(h.split('.')[1],10);
+    if(n>=16&&n<=31)return true;
+  }
+  if(/^169\.254\./.test(h))return true;
+  if(/^[0-9a-f:]+$/.test(h)&&h.includes('::'))return true;
+  return false;
+}
+function showWebhookTip(url){
+  const tip=$('webhookTip');
+  if(!tip)return;
+  let host;
+  try{host=new URL(url).hostname}catch{return}
+  const priv=isPrivateWebhookHost(host);
+  const lines=[];
+  if(priv)lines.push('This host ('+esc(host)+') is private/local. OpenWA will refuse to deliver to it unless its SSRF_ALLOWED_HOSTS includes it, and the host must be reachable from OpenWA (not from your browser).');
+  else lines.push('This host resolves publicly, so OpenWA can deliver to it — as long as it points at this bridge.');
+  tip.style.display=lines.length?'block':'none';
+  tip.innerHTML='<strong>Reachability:</strong> '+lines.join(' ');
+}
 async function loadWebhooks(){
   let d;
   try{d=await api('/webhooks')}catch{return}
@@ -712,6 +741,7 @@ async function loadWebhooks(){
     '<td><code>'+esc(w.url)+'</code></td>'+
     '<td style="width:80px"><button class="btn sm" onclick="copyText(\''+esc(w.url)+'\')">Copy</button></td></tr>').join('') ||
     emptyRows(3,'Create characters to get per-character webhooks');
+  showWebhookTip(d.generic.url);
 }
 
 async function regenerateToken(){
