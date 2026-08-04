@@ -44,8 +44,15 @@
     <div class="bell-wrap">
       <div class="nav-item" onclick="toggleBell()"><span>🔔</span><span>Notifications</span><span class="bell-badge hidden" id="bellBadge">0</span></div>
       <div class="bell-drop hidden" id="bellDrop">
-        <div class="bell-head"><strong>Notifications</strong><button class="btn sm" onclick="markAllRead()">Mark all read</button></div>
+        <div class="bell-head">
+          <strong>Notifications</strong>
+          <div class="bell-actions">
+            <button class="btn sm" onclick="markAllRead()">Read all</button>
+            <button class="btn sm danger" onclick="clearAllNotifications()">Clear</button>
+          </div>
+        </div>
         <div class="bell-list" id="bellList"><div class="empty">Loading...</div></div>
+        <div class="bell-foot"><button class="btn sm" onclick="loadBell()">↻ Refresh</button></div>
       </div>
     </div>
 

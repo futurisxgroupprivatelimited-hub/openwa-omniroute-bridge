@@ -101,7 +101,16 @@ document.querySelectorAll('.nav-item[data-view]').forEach(item=>{
 });
 
 // ── notifications ───────────────────────────────────────
-let notifTimer=null;
+const NOTIF_ICON={info:'ℹ️',success:'✅',warning:'⚠️',error:'🚨',danger:'🚨'};
+function relTime(t){
+  const d=new Date(t);if(isNaN(d))return '';
+  const s=Math.max(1,Math.floor((Date.now()-d)/1000));
+  if(s<60)return 'just now';
+  const m=Math.floor(s/60);if(m<60)return m+'m ago';
+  const h=Math.floor(m/60);if(h<24)return h+'h ago';
+  const days=Math.floor(h/24);if(days<7)return days+'d ago';
+  return d.toLocaleDateString([],{month:'short',day:'numeric'});
+}
 function toggleBell(){
   const d=$('bellDrop');
   d.classList.toggle('hidden');
@@ -111,14 +120,45 @@ async function loadBell(){
   try{
     const d=await api('/notifications?limit=25');
     const el=$('bellList');
-    if(!d.items.length){el.innerHTML='<div class="empty">No notifications yet</div>';return}
-    el.innerHTML=d.items.map(n=>'<div class="bell-item'+(n.read?'':' unread')+'">'+
-      '<div class="bell-title '+n.level+'">'+esc(n.title)+'</div>'+
-      '<div class="bell-body">'+esc(n.body)+'</div>'+
-      '<div class="bell-time">'+fmt(n.created_at)+'</div></div>').join('');
+    if(!d.items.length){el.innerHTML='<div class="empty">You\'re all caught up 🎉</div>';return}
+    el.innerHTML=d.items.map(n=>{
+      const lv=['error','danger'].includes(n.level)?'error':n.level;
+      return '<div class="bell-item'+(n.read?'':' unread')+'" data-id="'+n.id+'" onclick="markNotifRead(this)">'+
+        '<div class="bell-title '+lv+'"><span class="bell-ico">'+(NOTIF_ICON[lv]||'ℹ️')+'</span>'+esc(n.title)+'</div>'+
+        '<div class="bell-body">'+esc(n.body)+'</div>'+
+        '<div class="bell-time">'+relTime(n.created_at)+(n.read?'':' · <span class="bell-unread-dot"></span>')+'</div></div>';
+    }).join('');
   }catch{}
 }
-async function pollNotifications(){
+async function markNotifRead(el){
+  const wasUnread=el.classList.contains('unread');
+  if(wasUnread){
+    try{
+      await api('/notifications/read',{method:'POST',body:JSON.stringify({ids:[el.dataset.id]})});
+      el.classList.remove('unread');
+      el.querySelector('.bell-unread-dot')?.remove();
+      pollNotifications(true);
+    }catch{}
+  }
+}
+async function markAllRead(){
+  try{
+    await api('/notifications/read',{method:'POST',body:JSON.stringify({})});
+    document.querySelectorAll('.bell-item').forEach(i=>i.classList.remove('unread'));
+    $('bellBadge').classList.add('hidden');
+    toast('All notifications marked read');
+  }catch(e){toast(e.message,true)}
+}
+async function clearAllNotifications(){
+  if(!confirm('Clear all notifications?'))return;
+  try{
+    await api('/notifications',{method:'DELETE'});
+    $('bellBadge').classList.add('hidden');
+    loadBell();
+    toast('Notifications cleared');
+  }catch(e){toast(e.message,true)}
+}
+async function pollNotifications(skipRecurse){
   if(!token)return;
   try{
     const d=await api('/notifications/unread-count');
@@ -126,15 +166,7 @@ async function pollNotifications(){
     if(d.count>0){b.textContent=d.count>99?'99+':d.count;b.classList.remove('hidden')}
     else b.classList.add('hidden');
   }catch{}
-  setTimeout(pollNotifications,15000);
-}
-async function markAllRead(){
-  try{
-    await api('/notifications/read',{method:'POST',body:JSON.stringify({})});
-    toast('All notifications marked read');
-    $('bellBadge').classList.add('hidden');
-    loadBell();
-  }catch(e){toast(e.message,true)}
+  if(!skipRecurse)setTimeout(pollNotifications,15000);
 }
 
 // ── overview ────────────────────────────────────────────

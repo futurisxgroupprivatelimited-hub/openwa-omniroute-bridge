@@ -140,15 +140,21 @@ tr:last-child td{border-bottom:none}
 .bell-head{display:flex;justify-content:space-between;align-items:center;padding:12px 14px;border-bottom:1px solid var(--border)}
 .bell-head strong{font-size:13px}
 .bell-list{max-height:340px;overflow-y:auto}
-.bell-item{padding:11px 14px;border-bottom:1px solid var(--border);font-size:12px}
+.bell-item{padding:11px 14px;border-bottom:1px solid var(--border);font-size:12px;cursor:pointer;transition:background .12s}
+.bell-item:hover{background:rgba(255,255,255,.03)}
 .bell-item:last-child{border-bottom:none}
-.bell-item.unread{background:#7c6cf00d;border-left:3px solid var(--accent)}
-.bell-title{font-weight:700;margin-bottom:2px}
+.bell-item.unread{background:#7c6cf010;border-left:3px solid var(--accent)}
+.bell-ico{margin-right:6px;font-size:12px}
+.bell-title{font-weight:700;margin-bottom:2px;display:flex;align-items:center}
 .bell-title.warning{color:var(--warning)}
 .bell-title.success{color:var(--success)}
 .bell-title.info{color:var(--text)}
-.bell-body{color:var(--muted);line-height:1.5}
-.bell-time{font-size:10px;color:var(--muted);margin-top:4px}
+.bell-title.error,.bell-title.danger{color:var(--danger)}
+.bell-body{color:var(--muted);line-height:1.5;word-break:break-word}
+.bell-time{font-size:10px;color:var(--muted);margin-top:4px;display:flex;align-items:center;gap:4px}
+.bell-unread-dot{display:inline-block;width:7px;height:7px;border-radius:50%;background:var(--accent)}
+.bell-actions{display:flex;gap:4px}
+.bell-foot{padding:8px 14px;border-top:1px solid var(--border);text-align:center}
 
 /* Playground — iOS Messages-style chat */
 .overlay{position:fixed;inset:0;background:rgba(0,0,0,.55);backdrop-filter:blur(18px) saturate(1.2);-webkit-backdrop-filter:blur(18px) saturate(1.2);display:flex;align-items:center;justify-content:center;z-index:200;padding:20px;animation:fadein .18s ease}

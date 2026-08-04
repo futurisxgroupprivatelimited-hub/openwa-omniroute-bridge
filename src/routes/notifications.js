@@ -1,6 +1,6 @@
 import { Router } from 'express';
 import { requireUser } from '../auth.js';
-import { listNotifications, unreadCount, markRead } from '../services/notifications.js';
+import { listNotifications, unreadCount, markRead, deleteNotifications } from '../services/notifications.js';
 
 const router = Router();
 router.use(requireUser);
@@ -19,6 +19,11 @@ router.get('/unread-count', async (req, res) => {
 router.post('/read', async (req, res) => {
   const ids = Array.isArray(req.body?.ids) ? req.body.ids : null;
   res.json(await markRead(req.user.id, ids));
+});
+
+router.delete('/', async (req, res) => {
+  const ids = Array.isArray(req.query?.ids) ? req.query.ids : Array.isArray(req.body?.ids) ? req.body.ids : null;
+  res.json(await deleteNotifications(req.user.id, ids));
 });
 
 export default router;

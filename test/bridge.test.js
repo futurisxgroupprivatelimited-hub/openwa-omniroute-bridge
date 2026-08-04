@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { isOnline, buildSystemPrompt, driveDirectUrl, splitMediaTokens, webhookUrl, typingSchedule, buildCharacterMessages } from '../src/services/bridge.js';
+import { isOnline, buildSystemPrompt, driveDirectUrl, splitMediaTokens, webhookUrl, typingSchedule, buildCharacterMessages, looksNonHuman, replyProblem } from '../src/services/bridge.js';
 
 // ── isOnline ──────────────────────────────────────────────────────
 test('isOnline: treats ready/active/connected (any case) as online', () => {
@@ -190,4 +190,36 @@ test('buildCharacterMessages: maps any non-assistant history role to user', () =
   const msgs = buildCharacterMessages({}, [{ role: 'system', content: 'x' }, { role: 'assistant', content: 'y' }], 'z');
   assert.equal(msgs[1].role, 'user');
   assert.equal(msgs[2].role, 'assistant');
+});
+
+// ── looksNonHuman / replyProblem (never expose AI to real users) ──
+test('looksNonHuman: normal human replies pass', () => {
+  assert.equal(looksNonHuman('Hey! How are you doing?'), false);
+  assert.equal(looksNonHuman('Sure, see you at 6pm tomorrow.'), false);
+  assert.equal(looksNonHuman(''), false);
+});
+
+test('looksNonHuman: catches explicit AI self-identification', () => {
+  assert.equal(looksNonHuman('As an AI, I cannot help with that.'), true);
+  assert.equal(looksNonHuman('I am an AI language model.'), true);
+  assert.equal(looksNonHuman("Sorry, I'm just an AI assistant."), true);
+  assert.equal(looksNonHuman('I am ChatGPT, here to help.'), true);
+});
+
+test('looksNonHuman: catches quota / rate-limit / API errors', () => {
+  assert.equal(looksNonHuman('Error 429: too many requests.'), true);
+  assert.equal(looksNonHuman('Insufficient quota for this API key.'), true);
+  assert.equal(looksNonHuman('Rate limit exceeded, try again later.'), true);
+  assert.equal(looksNonHuman('401 invalid api key.'), true);
+});
+
+test('replyProblem: null / empty replies are flagged', () => {
+  assert.equal(replyProblem(null), 'empty reply');
+  assert.equal(replyProblem(''), 'empty reply');
+  assert.equal(replyProblem('   \n '), 'empty reply');
+});
+
+test('replyProblem: AI/error text is flagged, clean text passes', () => {
+  assert.equal(replyProblem('As an AI I cannot do that'), 'reply exposed AI/error content');
+  assert.equal(replyProblem('Catch you later!'), null);
 });

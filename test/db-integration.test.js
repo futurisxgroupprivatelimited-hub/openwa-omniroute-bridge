@@ -126,6 +126,30 @@ test('notifications: pagination returns total + pages', async (t) => {
   assert.equal(page2.items.length, 3);
 });
 
+test('notifications: notifyOwnerAndAdmins alerts the owner and every admin', async (t) => {
+  if (!guard(t)) return;
+  const admins = (await pool.query("SELECT id FROM users WHERE role='admin'")).rows.map(r => r.id);
+  const created = await notif.notifyOwnerAndAdmins(uid, { type: 'llm_failed', level: 'error', title: 'AI reply failed', body: 'silent' });
+  const targetIds = new Set(created.map(n => n.user_id));
+  assert.ok(targetIds.has(uid), 'owner must be notified');
+  for (const aid of admins) assert.ok(targetIds.has(aid), 'each admin must be notified');
+  assert.ok(created.length >= 1);
+  assert.ok(created.every(n => n.level === 'error'));
+});
+
+test('notifications: deleteNotifications clears rows (all or by ids)', async (t) => {
+  if (!guard(t)) return;
+  const a = await notif.createNotification(uid, { title: 'del-a' });
+  const b = await notif.createNotification(uid, { title: 'del-b' });
+  await notif.deleteNotifications(uid, [a.id]);
+  const after = await notif.listNotifications(uid, { limit: 200 });
+  assert.ok(!after.items.some(n => n.id === a.id));
+  assert.ok(after.items.some(n => n.id === b.id));
+  await notif.deleteNotifications(uid, null);
+  const gone = await notif.listNotifications(uid, { limit: 200 });
+  assert.equal(gone.items.some(n => n.id === b.id), false);
+});
+
 // ── countQuery (stats) ────────────────────────────────────────────
 test('countQuery: counts rows of a wrapped SELECT', async (t) => {
   if (!guard(t)) return;

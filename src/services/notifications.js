@@ -9,6 +9,16 @@ export async function createNotification(userId, { type = 'system', level = 'inf
   return r.rows[0];
 }
 
+// Alert the profile owner AND every admin when something needs attention (e.g. an
+// AI reply failed). The end user stays silent; the humans running the bot get told.
+export async function notifyOwnerAndAdmins(ownerUserId, payload) {
+  const admins = (await query("SELECT id FROM users WHERE role='admin'")).rows.map(a => a.id);
+  const targets = new Set([ownerUserId, ...admins].filter(Boolean));
+  const created = [];
+  for (const uid of targets) created.push(await createNotification(uid, payload));
+  return created;
+}
+
 export async function listNotifications(userId, { limit = 30, page = 1, unreadOnly = false } = {}) {
   const where = ['user_id=$1'];
   const params = [userId];
@@ -33,6 +43,15 @@ export async function markRead(userId, ids = null) {
     await query('UPDATE notifications SET read=true WHERE user_id=$1 AND id = ANY($2::uuid[])', [userId, ids]);
   } else {
     await query('UPDATE notifications SET read=true WHERE user_id=$1 AND read=false', [userId]);
+  }
+  return { ok: true };
+}
+
+export async function deleteNotifications(userId, ids = null) {
+  if (Array.isArray(ids) && ids.length) {
+    await query('DELETE FROM notifications WHERE user_id=$1 AND id = ANY($2::uuid[])', [userId, ids]);
+  } else {
+    await query('DELETE FROM notifications WHERE user_id=$1', [userId]);
   }
   return { ok: true };
 }

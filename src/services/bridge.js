@@ -2,7 +2,7 @@ import { query } from '../db.js';
 import { askModel } from './omniroute.js';
 import * as openwa from './openwa.js';
 import { config } from '../config.js';
-import { createNotification } from './notifications.js';
+import { createNotification, notifyOwnerAndAdmins } from './notifications.js';
 
 const ONLINE = new Set(['ready', 'active', 'connected']);
 export function isOnline(status) {
@@ -173,6 +173,74 @@ export function buildCharacterMessages(character, history, text) {
   return msgs;
 }
 
+// Phrases that would instantly reveal the sender is a bot/AI to a real user.
+const NON_HUMAN = [
+  /\bas an ai\b/i, /\bi am (an |a )?ai\b/i, /\bi['’]m (just |only |)an? ai\b/i, /\bi (am|['’]m) (an |a )?language model\b/i,
+  /\bas a language model\b/i, /\bchatgpt\b/i, /\bopenai\b/i, /\bapi key\b/i,
+  /\binsufficient quota\b/i, /\bquota exceeded\b/i, /\brate limit\b/i, /\b402 payment required\b/i,
+  /\b429\b/, /\btoo many requests\b/i, /\bauthentication failed\b/i, /\binvalid api key\b/i,
+  /\berror\s*\d{3}\b/i, /\bi cannot (access|process|provide) .*(personal|private|confidential)/i,
+];
+export function looksNonHuman(text) {
+  return NON_HUMAN.some(re => re.test(String(text || '')));
+}
+
+// Decide whether a model reply is safe to send to a real user. Returns null if OK.
+export function replyProblem(reply) {
+  const text = String(reply || '').trim();
+  if (!text) return 'empty reply';
+  if (looksNonHuman(text)) return 'reply exposed AI/error content';
+  return null;
+}
+
+// Generate a reply, type it out, send it. Returns the sent text, or null when the
+// reply was suppressed (empty / bot-like / model failure) — in which case the end
+// user receives NOTHING and the owner + admins are notified instead.
+export async function sendHumanReply(user, { session, chatId, character, messages }) {
+  let reply;
+  try {
+    reply = await askModel(user, messages);
+  } catch (e) {
+    const err = String(e?.message || e || '').slice(0, 400);
+    await notifyOwnerAndAdmins(user.id, {
+      type: 'llm_failed', level: 'error', sessionId: session?.id || null,
+      title: 'AI reply failed — nothing was sent',
+      body: `${chatId}: no reply was delivered (staying silent). ${err}`,
+    });
+    await logLine(`[llm-fail] ${user.email} ${chatId}: ${err}`);
+    return null;
+  }
+
+  const problem = replyProblem(reply);
+  if (problem) {
+    await notifyOwnerAndAdmins(user.id, {
+      type: problem === 'empty reply' ? 'llm_empty' : 'llm_exposed', level: 'warning', sessionId: session?.id || null,
+      title: problem === 'empty reply' ? 'Empty AI reply suppressed' : 'Bot-like reply suppressed',
+      body: `${chatId}: the model produced "${problem}". The message was NOT sent to the user to keep it human. Raw reply: ${String(reply || '').slice(0, 200)}`,
+    });
+    await logLine(`[llm-suppress] ${user.email} ${chatId}: ${problem}`);
+    return null;
+  }
+
+  const { text: replyText, media } = splitMediaTokens(reply);
+  await humanTypingPattern(user, session, chatId, replyText.length, character?.typing_profile);
+  if (replyText) {
+    await openwa.sendText({ base: user.openwa_base_url, apiKey: user.openwa_api_key, sessionId, chatId, text: replyText });
+  }
+  for (const url of media.slice(0, 2)) {
+    const direct = driveDirectUrl(url);
+    try {
+      await openwa.sendMedia({ base: user.openwa_base_url, apiKey: user.openwa_api_key, sessionId, chatId, file: direct, caption: replyText.slice(0, 200) });
+      await logLine(`[media] ${user.email} ${chatId} sent image`);
+    } catch (e) {
+      await logLine(`[media] ${user.email} send failed (${e.message}); sending link as text`);
+      await openwa.sendText({ base: user.openwa_base_url, apiKey: user.openwa_api_key, sessionId, chatId, text: direct }).catch(() => {});
+    }
+  }
+  await persistMessage(user.id, session?.id, chatId, 'outgoing', replyText, character?.id || null);
+  return replyText;
+}
+
 export async function handleInboundMessage(user, event, slug) {
   const data = event.data || {};
   if (event.event !== 'message.received' || !data) return;
@@ -203,22 +271,8 @@ export async function handleInboundMessage(user, event, slug) {
 
   await persistMessage(user.id, session?.id, chatId, 'incoming', text, character?.id || null, data.id || data.key || null);
 
-  const reply = await askModel(user, messages);
-  await humanTypingPattern(user, session, chatId, reply.length, character?.typing_profile);
-  const { text: replyText, media } = splitMediaTokens(reply);
-  await openwa.sendText({ base: user.openwa_base_url, apiKey: user.openwa_api_key, sessionId, chatId, text: replyText });
-  for (const url of media.slice(0, 2)) {
-    const direct = driveDirectUrl(url);
-    try {
-      await openwa.sendMedia({ base: user.openwa_base_url, apiKey: user.openwa_api_key, sessionId, chatId, file: direct, caption: replyText.slice(0, 200) });
-      await logLine(`[media] ${user.email} ${chatId} sent image`);
-    } catch (e) {
-      await logLine(`[media] ${user.email} send failed (${e.message}); sending link as text`);
-      await openwa.sendText({ base: user.openwa_base_url, apiKey: user.openwa_api_key, sessionId, chatId, text: direct }).catch(() => {});
-    }
-  }
-  await persistMessage(user.id, session?.id, chatId, 'outgoing', replyText, character?.id || null);
-  await logLine(`[llm] -> ${user.email} ${chatId}: ${replyText.slice(0, 60)}`);
+  const sent = await sendHumanReply(user, { session, chatId, character, messages });
+  await logLine(`[llm] -> ${user.email} ${chatId}: ${sent ? sent.slice(0, 60) : '(suppressed / not sent)'}`);
 
   if (session?.id) {
     await query('UPDATE wa_sessions SET last_seen=now() WHERE id=$1', [session.id]);
@@ -394,10 +448,8 @@ export async function catchUpSession(user, sessionRow) {
       const latest = missed[missed.length - 1];
       const history = await fetchHistory(user, sessionRow, chat_id, latest.body);
       const messages = [{ role: 'system', content: buildSystemPrompt(character) }, ...history, { role: 'user', content: latest.body }];
-      const reply = await askModel(user, messages);
-      await openwa.sendText({ base: user.openwa_base_url, apiKey: user.openwa_api_key, sessionId: s.openwa_session_id, chatId: chat_id, text: reply });
-      await persistMessage(user.id, sessionRow.id, chat_id, 'outgoing', reply, character?.id || null);
-      replied.push(chat_id);
+      const sent = await sendHumanReply(user, { session: s, chatId: chat_id, character, messages });
+      if (sent) replied.push(chat_id);
       await logLine(`[catchup] ${user.email} ${chat_id}: replied to ${missed.length} missed msg(s)`);
     } catch (e) {
       await logLine(`[catchup] ${user.email} ${chat_id}: ${e.message}`);
